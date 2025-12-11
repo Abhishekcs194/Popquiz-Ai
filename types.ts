@@ -17,6 +17,7 @@ export interface Player {
   isHost: boolean;
   isReady: boolean;
   hasAnsweredRound: boolean; // Did they answer the current question correctly?
+  isBot?: boolean;
 }
 
 export interface GameSettings {

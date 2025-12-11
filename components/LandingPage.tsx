@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { Button } from './Button';
 import { AVATARS } from '../constants';
 
@@ -13,6 +13,14 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onCreate, onJoin, init
   const [avatar, setAvatar] = useState(AVATARS[0]);
   const [roomCode, setRoomCode] = useState(initialCode);
   const [mode, setMode] = useState<'menu' | 'join'>('menu');
+
+  // If a code is provided via props (e.g. from URL), switch to join mode immediately
+  useEffect(() => {
+    if (initialCode) {
+        setRoomCode(initialCode);
+        setMode('join');
+    }
+  }, [initialCode]);
 
   const handleCreate = () => {
     if (!name.trim()) return;
@@ -87,11 +95,13 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onCreate, onJoin, init
             />
           </div>
           <Button fullWidth size="lg" variant="success" onClick={handleJoin} disabled={!name.trim() || !roomCode.trim()}>
-            Enter Room
+            {initialCode ? "Join Room" : "Enter Room"}
           </Button>
-          <button onClick={() => setMode('menu')} className="w-full text-center text-white/50 text-sm hover:text-white mt-2">
-            Back
-          </button>
+          {!initialCode && (
+            <button onClick={() => setMode('menu')} className="w-full text-center text-white/50 text-sm hover:text-white mt-2">
+                Back
+            </button>
+          )}
         </div>
       )}
     </div>

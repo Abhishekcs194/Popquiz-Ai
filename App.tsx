@@ -20,6 +20,9 @@ const App: React.FC = () => {
   // Local Player Info
   const [localPlayerId] = useState(() => Math.random().toString(36).substring(2, 9));
   
+  // Ref to store pending join data to handle connection delay
+  const pendingJoinRef = useRef<{name: string, avatar: string} | null>(null);
+  
   // Game State (The "Truth")
   const [gameState, setGameState] = useState<GameState>({
     roomId: '',
@@ -39,6 +42,8 @@ const App: React.FC = () => {
     const params = new URLSearchParams(window.location.search);
     const room = params.get('room');
     if (room) {
+      // Just set the Room ID, don't change status yet. 
+      // This allows LandingPage to pick it up and show the Join UI.
       setGameState(prev => ({ ...prev, roomId: room }));
     }
   }, []);
@@ -49,6 +54,21 @@ const App: React.FC = () => {
   useEffect(() => {
     if (gameState.roomId) {
       multiplayer.connect(gameState.roomId, handleNetworkMessage);
+      
+      // If we have a pending join request (user just clicked Join), send it now that connection is open.
+      if (pendingJoinRef.current) {
+        // Small delay to ensure host is ready/channel is established
+        setTimeout(() => {
+            if (pendingJoinRef.current) {
+                multiplayer.send({
+                    type: 'JOIN_REQUEST',
+                    payload: pendingJoinRef.current,
+                    senderId: localPlayerId
+                });
+                pendingJoinRef.current = null;
+            }
+        }, 500);
+      }
     }
     return () => multiplayer.disconnect();
   }, [gameState.roomId]);
@@ -59,26 +79,35 @@ const App: React.FC = () => {
       case 'JOIN_REQUEST':
         // If I am the host, I receive join requests and reply with the full state
         if (isLocalHost()) {
-          const newPlayer: Player = {
-            id: msg.senderId!,
-            name: msg.payload.name,
-            avatar: msg.payload.avatar,
-            score: 0,
-            streak: 0,
-            isHost: false,
-            isReady: false,
-            hasAnsweredRound: false
-          };
-          
-          // Check if already exists
-          const exists = gameState.players.find(p => p.id === newPlayer.id);
-          let updatedPlayers = gameState.players;
-          if (!exists) {
-            updatedPlayers = [...gameState.players, newPlayer];
-          }
+          setGameState(prevState => {
+              const newPlayer: Player = {
+                id: msg.senderId!,
+                name: msg.payload.name,
+                avatar: msg.payload.avatar,
+                score: 0,
+                streak: 0,
+                isHost: false,
+                isReady: false,
+                hasAnsweredRound: false
+              };
+              
+              // Prevent duplicates
+              const playerExists = prevState.players.some(p => p.id === newPlayer.id);
+              if (playerExists) return prevState;
 
-          const newState = { ...gameState, players: updatedPlayers };
-          updateAndBroadcastState(newState);
+              const updatedState = { 
+                  ...prevState, 
+                  players: [...prevState.players, newPlayer] 
+              };
+              
+              // Broadcast immediately
+              multiplayer.send({
+                  type: 'STATE_UPDATE',
+                  payload: updatedState
+              });
+              
+              return updatedState;
+          });
         }
         break;
 
@@ -104,20 +133,32 @@ const App: React.FC = () => {
 
   // 3. Host Logic: Handle Actions
   const handlePlayerAction = (playerId: string, action: string, data: any) => {
-    let newState = { ...gameState };
-
-    if (action === 'READY_TOGGLE') {
-      newState.players = newState.players.map(p => 
-        p.id === playerId ? { ...p, isReady: !p.isReady } : p
-      );
-    } 
-    else if (action === 'ANSWER_CORRECT') {
-      newState.players = newState.players.map(p => 
-        p.id === playerId ? { ...p, score: p.score + 10, hasAnsweredRound: true } : p
-      );
-    }
-
-    updateAndBroadcastState(newState);
+    // We must use functional state updates or refs to ensure we have latest state
+    // But since this is triggered by an event, current state access is usually fine 
+    // IF we are careful. Better to use the stateRef pattern or functional updates inside setGameState.
+    // For simplicity in this structure, we'll read gameState but be aware of closures.
+    
+    setGameState(prevState => {
+        let newState = { ...prevState };
+        
+        if (action === 'READY_TOGGLE') {
+            newState.players = newState.players.map(p => 
+                p.id === playerId ? { ...p, isReady: !p.isReady } : p
+            );
+        } 
+        else if (action === 'ANSWER_CORRECT') {
+            newState.players = newState.players.map(p => 
+                p.id === playerId ? { ...p, score: p.score + 10, hasAnsweredRound: true } : p
+            );
+        }
+        
+        multiplayer.send({
+            type: 'STATE_UPDATE',
+            payload: newState
+        });
+        
+        return newState;
+    });
   };
 
   // 4. Host Logic: Game Loop / Timer
@@ -145,7 +186,7 @@ const App: React.FC = () => {
     }, 500);
 
     return () => clearInterval(interval);
-  }, [gameState.status, gameState.roundStartTime]); // Re-bind if status changes to playing
+  }, [gameState.status, gameState.roundStartTime]); 
 
   const handleRoundEnd = () => {
     const current = stateRef.current;
@@ -154,21 +195,23 @@ const App: React.FC = () => {
     const winner = current.players.find(p => p.score >= current.settings.pointsToWin);
     
     if (winner || current.currentQuestionIndex >= current.questions.length - 1) {
-        updateAndBroadcastState({
+        const newState = {
             ...current,
-            status: 'game_over'
-        });
+            status: 'game_over' as GameStatus
+        };
+        updateAndBroadcastState(newState);
     } else {
         // Next Question
         // Reset answered flags
         const resetPlayers = current.players.map(p => ({...p, hasAnsweredRound: false}));
         
-        updateAndBroadcastState({
+        const newState = {
             ...current,
             players: resetPlayers,
             currentQuestionIndex: current.currentQuestionIndex + 1,
             roundStartTime: Date.now()
-        });
+        };
+        updateAndBroadcastState(newState);
     }
   };
 
@@ -211,16 +254,16 @@ const App: React.FC = () => {
   };
 
   const handleJoinGame = (name: string, avatar: string, code: string) => {
-    // Initial state is mostly empty, we wait for sync
-    setGameState(prev => ({ ...prev, roomId: code, status: 'lobby' }));
+    // 1. Store the profile so the useEffect can send it once connected
+    pendingJoinRef.current = { name, avatar };
     
-    // Send request
-    multiplayer.connect(code, handleNetworkMessage);
-    multiplayer.send({
-        type: 'JOIN_REQUEST',
-        payload: { name, avatar },
-        senderId: localPlayerId
-    });
+    // 2. Set the Room ID and status. This triggers the useEffect to connect.
+    setGameState(prev => ({ 
+        ...prev, 
+        roomId: code, 
+        status: 'lobby',
+        players: [] // Empty initially, will fill when host syncs
+    }));
   };
 
   const handleUpdateSettings = (newSettings: GameSettings) => {
@@ -229,7 +272,7 @@ const App: React.FC = () => {
   };
 
   const handleToggleReady = () => {
-    if (isLocalHost()) return; // Host is always ready effectively (they start)
+    if (isLocalHost()) return; // Host is always ready
     multiplayer.send({
         type: 'PLAYER_ACTION',
         payload: { action: 'READY_TOGGLE' },
@@ -244,7 +287,6 @@ const App: React.FC = () => {
 
     // Handle AI Generation if needed
     if (gameState.settings.deckType === 'ai' && gameState.settings.aiTopic) {
-        // Temporarily set status to generating to show loading UI if we wanted
         try {
             const generated = await generateQuestions(gameState.settings.aiTopic);
             if (generated.length > 0) finalQuestions = generated;
@@ -278,7 +320,6 @@ const App: React.FC = () => {
   };
 
   const handleRestart = () => {
-      // Return to lobby
        updateAndBroadcastState({
         ...gameState,
         status: 'lobby',
@@ -314,15 +355,23 @@ const App: React.FC = () => {
 
         {gameState.status === 'lobby' && (
           <div className="flex-1 flex items-center justify-center">
-            <Lobby 
-                roomId={gameState.roomId}
-                isHost={isLocalHost()}
-                players={gameState.players}
-                settings={gameState.settings}
-                onUpdateSettings={handleUpdateSettings}
-                onReady={handleToggleReady}
-                onStart={handleStartGame}
-            />
+             {gameState.players.length === 0 && !isLocalHost() ? (
+                 <div className="text-center animate-pulse">
+                     <div className="text-4xl mb-4">🔗</div>
+                     <h2 className="text-2xl font-bold">Connecting to Room...</h2>
+                     <p className="text-white/50">Waiting for Host...</p>
+                 </div>
+             ) : (
+                <Lobby 
+                    roomId={gameState.roomId}
+                    isHost={isLocalHost()}
+                    players={gameState.players}
+                    settings={gameState.settings}
+                    onUpdateSettings={handleUpdateSettings}
+                    onReady={handleToggleReady}
+                    onStart={handleStartGame}
+                />
+             )}
           </div>
         )}
 
