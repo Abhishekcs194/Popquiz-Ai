@@ -61,6 +61,23 @@ const App: React.FC = () => {
     }
   }, []);
 
+  // --- Pre-caching Images ---
+  useEffect(() => {
+      // Logic: Look ahead 3 questions and load images into browser cache
+      if (gameState.status === 'playing' || gameState.status === 'generating') {
+          const start = gameState.currentQuestionIndex + 1;
+          const end = start + 3;
+          const upcoming = gameState.questions.slice(start, end);
+          
+          upcoming.forEach(q => {
+              if (q.type === 'image' && q.content) {
+                  const img = new Image();
+                  img.src = q.content;
+              }
+          });
+      }
+  }, [gameState.currentQuestionIndex, gameState.questions, gameState.status]);
+
   // --- Networking & Logic ---
 
   // 1. Connection Lifecycle

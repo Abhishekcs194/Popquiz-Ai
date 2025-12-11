@@ -2,6 +2,7 @@ export interface Question {
   id: string;
   type: 'image' | 'text';
   content: string; // URL for image, or text string
+  questionText?: string; // Specific question to display above images (e.g. "What logo is this?")
   answer: string;
   acceptedAnswers?: string[]; // Array of valid aliases/abbreviations
   category?: string;

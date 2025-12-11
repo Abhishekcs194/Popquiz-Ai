@@ -149,15 +149,21 @@ export const GameRound: React.FC<GameRoundProps> = ({
             {/* The Question */}
             <div className={`animate-pop w-full max-w-2xl text-center transition-all duration-500 ${showResult ? 'blur-sm scale-95 opacity-50' : ''}`}>
                 {question.type === 'image' && (
-                    <div className="relative inline-block group mb-4">
-                        <img 
-                            src={question.content} 
-                            alt="Question" 
-                            className="max-h-[350px] w-auto mx-auto rounded-xl shadow-2xl border-4 border-white object-contain bg-white"
-                        />
+                    <div className="flex flex-col items-center">
+                        {/* Display Question Text if available */}
+                        <div className="text-xl md:text-3xl font-bold mb-6 text-white drop-shadow-md">
+                            {question.questionText || "What is this?"}
+                        </div>
+                        <div className="relative inline-block group mb-4">
+                            <img 
+                                src={question.content} 
+                                alt="Question" 
+                                className="max-h-[350px] w-auto mx-auto rounded-xl shadow-2xl border-4 border-white object-contain bg-white"
+                            />
+                        </div>
                     </div>
                 )}
-                {/* Fallback for emoji if old questions exist, but mainly text now */}
+                {/* Fallback for text */}
                 {question.type === 'text' && (
                     <div className="text-3xl md:text-5xl font-black leading-tight drop-shadow-lg px-4 mb-8">
                         {question.content}

@@ -14,7 +14,7 @@ RULES:
    - DO NOT search for real URLs. 
    - Instead, generate a dynamic URL using this format: "https://image.pollinations.ai/prompt/{visual_description_of_image}?width=800&height=600&nologo=true"
    - Replace {visual_description_of_image} with a vivid, simple description encoded for a URL (e.g. "pikachu%20cartoon", "eiffel%20tower%20at%20night").
-   - Ensure the description allows the player to guess the answer.
+   - **Text Prompt**: For image questions, you MUST provide a 'questionText' field (e.g., "What character is this?", "Name this city", "What brand logo is this?").
 
 3. **Ratio**: Unless "(images)" is specified, aim for ~35% 'image' type and ~65% 'text' type mix.
 
@@ -65,6 +65,7 @@ export const generateQuestions = async (topic: string, count: number, existingAn
               id: { type: Type.STRING },
               type: { type: Type.STRING, enum: ['text', 'image'] },
               content: { type: Type.STRING, description: "The question text OR the pollinations.ai URL" },
+              questionText: { type: Type.STRING, description: "The question to ask above the image (Required for image type, e.g. 'What movie is this?')" },
               answer: { type: Type.STRING, description: "The primary correct answer (1-3 words)" },
               acceptedAnswers: { 
                 type: Type.ARRAY, 
