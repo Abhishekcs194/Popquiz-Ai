@@ -11,7 +11,7 @@ The goal is to generate fast-paced trivia where users TYPE the answer.
 5. If multiple topics are provided, distribute the questions evenly among them.
 `;
 
-export const generateQuestions = async (topic: string, count: number = 10): Promise<Question[]> => {
+export const generateQuestions = async (topic: string, count: number): Promise<Question[]> => {
   try {
     const apiKey = process.env.API_KEY;
     if (!apiKey) {
@@ -20,9 +20,12 @@ export const generateQuestions = async (topic: string, count: number = 10): Prom
 
     const ai = new GoogleGenAI({ apiKey });
 
+    // We cap the request to avoid token limits, but try to meet the count
+    const safeCount = Math.min(count, 50); 
+
     const response = await ai.models.generateContent({
       model: "gemini-2.5-flash",
-      contents: `Generate ${count} trivia questions based on these themes: "${topic}". 
+      contents: `Generate ${safeCount} trivia questions based on these themes: "${topic}". 
       If the input contains multiple comma-separated themes, mix questions from all of them.
       Ensure the answers are simple strings.
       For 'emoji' type, the content is a string of emojis.

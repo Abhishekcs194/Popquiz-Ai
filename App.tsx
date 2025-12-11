@@ -72,8 +72,6 @@ const App: React.FC = () => {
   }, [gameState.roomId]);
 
   // 2. Join Request Retry Loop
-  // This ensures that if we are in 'lobby' but have no players (meaning we haven't synced with host),
-  // we keep trying to join. This is crucial for P2P as connection takes a few seconds.
   useEffect(() => {
     let interval: number;
 
@@ -88,13 +86,9 @@ const App: React.FC = () => {
              });
          }
       };
-
-      // Try immediately
       tryJoin();
-      // And retry every 1.5 seconds until we get state back
       interval = window.setInterval(tryJoin, 1500);
     }
-
     return () => clearInterval(interval);
   }, [gameState.status, gameState.players.length, gameState.roomId]);
 
@@ -104,7 +98,6 @@ const App: React.FC = () => {
     
     switch (msg.type) {
       case 'JOIN_REQUEST':
-        // Only the host responds to join requests
         if (isLocalHost(current.players)) {
           const newPlayer: Player = {
             id: msg.senderId!,
@@ -127,19 +120,12 @@ const App: React.FC = () => {
                  players: [...current.players, newPlayer] 
              });
           }
-          
-          // Broadcast full state so the new player (and others) sync up
-          multiplayer.send({
-              type: 'STATE_UPDATE',
-              payload: nextState
-          });
+          multiplayer.send({ type: 'STATE_UPDATE', payload: nextState });
         }
         break;
 
       case 'STATE_UPDATE':
-        // Guests receive the authoritative state
         if (!isLocalHost(current.players) || current.players.length === 0) {
-            // console.log("[App] Received State Update");
             updateState(msg.payload);
         }
         break;
@@ -187,7 +173,6 @@ const App: React.FC = () => {
 
   // 5. Host Logic: Game Loop
   useEffect(() => {
-    // Only Host runs the game loop
     const current = gameStateRef.current;
     if (!isLocalHost(current.players) || current.status !== 'playing') return;
 
@@ -210,24 +195,68 @@ const App: React.FC = () => {
   }, [gameState.status]);
 
   const handleRoundEnd = () => {
-    const current = gameStateRef.current;
-    
-    // Check Win Condition
-    const winner = current.players.find(p => p.score >= current.settings.pointsToWin);
-    
-    if (winner || current.currentQuestionIndex >= current.questions.length - 1) {
-        const newState = updateState({ status: 'game_over' });
-        broadcast(newState);
-    } else {
-        // Next Question
-        const resetPlayers = current.players.map(p => ({...p, hasAnsweredRound: false}));
-        const newState = updateState({
-            players: resetPlayers,
-            currentQuestionIndex: current.currentQuestionIndex + 1,
-            roundStartTime: Date.now()
-        });
-        broadcast(newState);
-    }
+    // 1. Transition to Round Result (Pause for 3 seconds)
+    const newState = updateState({ status: 'round_result' });
+    broadcast(newState);
+
+    // 2. Wait 3 seconds, then process logic
+    setTimeout(() => {
+        processNextRound();
+    }, 3000);
+  };
+
+  const processNextRound = () => {
+      const current = gameStateRef.current;
+      
+      // Determine if anyone has won
+      // Logic:
+      // 1. Filter players who reached the win score
+      // 2. If nobody -> Next Round
+      // 3. If 1 person -> Winner -> Game Over
+      // 4. If 2+ people -> Check if there is a unique highest score. 
+      //    If yes -> Winner. If no (tie) -> Continue until tie broken.
+      
+      const potentialWinners = current.players.filter(p => p.score >= current.settings.pointsToWin);
+      
+      let isGameOver = false;
+
+      if (potentialWinners.length === 1) {
+          // Explicit winner
+          isGameOver = true;
+      } else if (potentialWinners.length > 1) {
+          // Tie-breaker logic
+          const sorted = potentialWinners.sort((a,b) => b.score - a.score);
+          const topScore = sorted[0].score;
+          const runnersUp = sorted.filter(p => p.score === topScore);
+          
+          if (runnersUp.length === 1) {
+              // Unique highest score found
+              isGameOver = true;
+          } else {
+              // Still a tie for 1st place, continue playing
+              isGameOver = false;
+          }
+      }
+
+      // Force game over if we run out of questions regardless of score
+      if (current.currentQuestionIndex >= current.questions.length - 1) {
+          isGameOver = true;
+      }
+
+      if (isGameOver) {
+          const newState = updateState({ status: 'game_over' });
+          broadcast(newState);
+      } else {
+          // Reset for next question
+          const resetPlayers = current.players.map(p => ({...p, hasAnsweredRound: false}));
+          const newState = updateState({
+              players: resetPlayers,
+              currentQuestionIndex: current.currentQuestionIndex + 1,
+              status: 'playing',
+              roundStartTime: Date.now()
+          });
+          broadcast(newState);
+      }
   };
 
   const broadcast = (state: GameState) => {
@@ -266,8 +295,6 @@ const App: React.FC = () => {
 
   const handleJoinGame = (name: string, avatar: string, code: string) => {
     pendingJoinRef.current = { name, avatar };
-    
-    // Switch to lobby to trigger the connection and retry loop
     updateState({ 
         roomId: code, 
         status: 'lobby',
@@ -299,7 +326,12 @@ const App: React.FC = () => {
     if (gameState.settings.deckType === 'ai' && gameState.settings.aiTopic) {
         try {
             updateState({ status: 'generating' as GameStatus }); 
-            const generated = await generateQuestions(gameState.settings.aiTopic);
+            
+            // Calculate how many questions we need:
+            // (Win Score / 10 points per Q) + 15 buffer
+            const countNeeded = Math.ceil(gameState.settings.pointsToWin / 10) + 15;
+            
+            const generated = await generateQuestions(gameState.settings.aiTopic, countNeeded);
             if (generated.length > 0) finalQuestions = generated;
         } catch (e) {
             console.error("AI Gen failed, using default");
@@ -390,7 +422,7 @@ const App: React.FC = () => {
           </div>
         )}
 
-        {gameState.status === 'playing' && (
+        {(gameState.status === 'playing' || gameState.status === 'round_result') && (
           <GameRound 
             question={gameState.questions[gameState.currentQuestionIndex]}
             questionIndex={gameState.currentQuestionIndex}
@@ -399,6 +431,7 @@ const App: React.FC = () => {
             duration={gameState.settings.roundDuration}
             startTime={gameState.roundStartTime}
             onAnswer={handleAnswer}
+            gameStatus={gameState.status}
           />
         )}
 
