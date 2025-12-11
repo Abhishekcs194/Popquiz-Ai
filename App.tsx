@@ -33,7 +33,6 @@ const App: React.FC = () => {
   });
 
   // State (for rendering)
-  // We sync this with the ref manually when needed to trigger re-renders
   const [gameState, setGameState] = useState<GameState>(gameStateRef.current);
 
   // Helper to update state and ref simultaneously
@@ -66,7 +65,7 @@ const App: React.FC = () => {
   // 1. Connection Lifecycle
   useEffect(() => {
     if (gameState.roomId) {
-      console.log(`[App] Connecting to channel: popquiz-${gameState.roomId}`);
+      // Connect to the P2P Mesh
       multiplayer.connect(gameState.roomId, (msg) => handleNetworkMessage(msg));
     }
     return () => multiplayer.disconnect();
@@ -74,14 +73,14 @@ const App: React.FC = () => {
 
   // 2. Join Request Retry Loop
   // This ensures that if we are in 'lobby' but have no players (meaning we haven't synced with host),
-  // we keep trying to join.
+  // we keep trying to join. This is crucial for P2P as connection takes a few seconds.
   useEffect(() => {
     let interval: number;
 
     if (gameState.status === 'lobby' && gameState.players.length === 0 && !isLocalHost(gameState.players)) {
       const tryJoin = () => {
          if (pendingJoinRef.current) {
-             console.log("[App] Sending JOIN_REQUEST...");
+             console.log("[App] Broadcasting JOIN_REQUEST to mesh...");
              multiplayer.send({
                  type: 'JOIN_REQUEST',
                  payload: pendingJoinRef.current,
@@ -92,8 +91,8 @@ const App: React.FC = () => {
 
       // Try immediately
       tryJoin();
-      // And retry every 2 seconds
-      interval = window.setInterval(tryJoin, 2000);
+      // And retry every 1.5 seconds until we get state back
+      interval = window.setInterval(tryJoin, 1500);
     }
 
     return () => clearInterval(interval);
@@ -119,18 +118,17 @@ const App: React.FC = () => {
             isBot: false
           };
           
-          // Prevent duplicates
           const playerExists = current.players.some(p => p.id === newPlayer.id);
           let nextState = current;
 
           if (!playerExists) {
+             console.log(`[Host] Accepting new player: ${newPlayer.name}`);
              nextState = updateState({ 
                  players: [...current.players, newPlayer] 
              });
           }
           
-          // ALWAYS broadcast state when receiving a join request, 
-          // even if player exists (to help them re-sync)
+          // Broadcast full state so the new player (and others) sync up
           multiplayer.send({
               type: 'STATE_UPDATE',
               payload: nextState
@@ -140,10 +138,10 @@ const App: React.FC = () => {
 
       case 'STATE_UPDATE':
         // Guests receive the authoritative state
-        // We only accept state updates if we are not the host (or if we are confused)
-        // Note: We deliberately don't check isLocalHost here initially because when joining, 
-        // we don't know who the host is yet until we receive the first state!
-        updateState(msg.payload);
+        if (!isLocalHost(current.players) || current.players.length === 0) {
+            // console.log("[App] Received State Update");
+            updateState(msg.payload);
+        }
         break;
 
       case 'PLAYER_ACTION':
@@ -172,7 +170,6 @@ const App: React.FC = () => {
         stateChanged = true;
     } 
     else if (action === 'ANSWER_CORRECT') {
-        // Prevent double scoring for same question
         const player = newPlayers.find(p => p.id === playerId);
         if (player && !player.hasAnsweredRound) {
             newPlayers = newPlayers.map(p => 
@@ -184,10 +181,7 @@ const App: React.FC = () => {
 
     if (stateChanged) {
         const newState = updateState({ players: newPlayers });
-        multiplayer.send({
-            type: 'STATE_UPDATE',
-            payload: newState
-        });
+        broadcast(newState);
     }
   };
 
@@ -199,13 +193,11 @@ const App: React.FC = () => {
 
     const interval = setInterval(() => {
         const now = Date.now();
-        const liveState = gameStateRef.current; // access fresh ref inside interval
+        const liveState = gameStateRef.current; 
         
-        // Safety check if status changed mid-interval
         if (liveState.status !== 'playing') return;
 
         const elapsed = (now - liveState.roundStartTime) / 1000;
-        
         const allAnswered = liveState.players.every(p => p.hasAnsweredRound);
         const timeUp = elapsed >= liveState.settings.roundDuration;
 
@@ -215,7 +207,7 @@ const App: React.FC = () => {
     }, 500);
 
     return () => clearInterval(interval);
-  }, [gameState.status]); // Re-bind if status changes
+  }, [gameState.status]);
 
   const handleRoundEnd = () => {
     const current = gameStateRef.current;
@@ -248,7 +240,7 @@ const App: React.FC = () => {
   // --- User Interaction Handlers ---
 
   const handleCreateGame = (name: string, avatar: string) => {
-    const roomId = Math.random().toString(36).substring(2, 8).toUpperCase();
+    const roomId = Math.random().toString(36).substring(2, 6).toUpperCase();
     const hostPlayer: Player = {
         id: localPlayerId,
         name,
@@ -256,12 +248,12 @@ const App: React.FC = () => {
         score: 0,
         streak: 0,
         isHost: true,
-        isReady: true, // Host is implicitly ready to configure
+        isReady: true,
         hasAnsweredRound: false,
         isBot: false
     };
 
-    const newState = updateState({
+    updateState({
         roomId,
         status: 'lobby',
         players: [hostPlayer],
@@ -275,9 +267,7 @@ const App: React.FC = () => {
   const handleJoinGame = (name: string, avatar: string, code: string) => {
     pendingJoinRef.current = { name, avatar };
     
-    // Just switch status to lobby. 
-    // The "Join Request Retry Loop" useEffect will pick this up 
-    // and send the request because players.length is 0.
+    // Switch to lobby to trigger the connection and retry loop
     updateState({ 
         roomId: code, 
         status: 'lobby',
@@ -308,7 +298,7 @@ const App: React.FC = () => {
     // Handle AI
     if (gameState.settings.deckType === 'ai' && gameState.settings.aiTopic) {
         try {
-            updateState({ status: 'generating' as GameStatus }); // Show loading if you want, or just wait
+            updateState({ status: 'generating' as GameStatus }); 
             const generated = await generateQuestions(gameState.settings.aiTopic);
             if (generated.length > 0) finalQuestions = generated;
         } catch (e) {
@@ -377,10 +367,14 @@ const App: React.FC = () => {
         {gameState.status === 'lobby' && (
           <div className="flex-1 flex items-center justify-center">
              {gameState.players.length === 0 && !isLocalHost(gameState.players) ? (
-                 <div className="text-center animate-pulse">
-                     <div className="text-4xl mb-4">🔗</div>
+                 <div className="text-center animate-pulse flex flex-col items-center">
+                     <div className="text-4xl mb-4">📡</div>
                      <h2 className="text-2xl font-bold">Connecting to Room...</h2>
-                     <p className="text-white/50">Attempting to reach Host...</p>
+                     <p className="text-white/50 text-sm mt-2">Establishing P2P Link...</p>
+                     <p className="text-white/30 text-xs mt-1">This can take a few seconds</p>
+                     <button onClick={() => window.location.reload()} className="mt-8 text-xs underline opacity-50 hover:opacity-100">
+                        Stuck? Refresh
+                     </button>
                  </div>
              ) : (
                 <Lobby 
@@ -406,6 +400,14 @@ const App: React.FC = () => {
             startTime={gameState.roundStartTime}
             onAnswer={handleAnswer}
           />
+        )}
+
+        {gameState.status === 'generating' && (
+           <div className="flex-1 flex items-center justify-center flex-col animate-pulse">
+               <div className="text-5xl mb-4">🤖</div>
+               <h2 className="text-2xl font-bold">AI is Thinking...</h2>
+               <p>Generating questions about "{gameState.settings.aiTopic}"</p>
+           </div>
         )}
 
         {gameState.status === 'game_over' && (

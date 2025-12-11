@@ -1,5 +1,5 @@
-// This service uses BroadcastChannel to simulate multiplayer across tabs/windows
-// In a real production app, this would be a WebSocket connection.
+// @ts-ignore
+import { joinRoom } from 'trystero';
 
 export type MessageType = 
   | 'JOIN_REQUEST' 
@@ -14,33 +14,54 @@ export interface NetworkMessage {
 }
 
 class MultiplayerService {
-  private channel: BroadcastChannel | null = null;
+  private room: any = null;
+  private sendAction: any = null;
   private onMessageCallback: ((msg: NetworkMessage) => void) | null = null;
 
   connect(roomId: string, onMessage: (msg: NetworkMessage) => void) {
-    if (this.channel) {
-      this.channel.close();
+    if (this.room) {
+      this.disconnect();
     }
-    this.channel = new BroadcastChannel(`popquiz-${roomId}`);
+
+    console.log(`[Multiplayer] Joining room: ${roomId}`);
+    // appId ensures we don't collide with other trystero apps
+    this.room = joinRoom({ appId: 'popquiz-ai-v1' }, roomId);
     this.onMessageCallback = onMessage;
-    
-    this.channel.onmessage = (event) => {
+
+    // 'game' is the "topic" for our messages
+    const [send, get] = this.room.makeAction('game');
+    this.sendAction = send;
+
+    // Listen for incoming data
+    get((data: any, peerId: string) => {
+      // data is the exact object we passed to send()
       if (this.onMessageCallback) {
-        this.onMessageCallback(event.data);
+        this.onMessageCallback(data);
       }
-    };
+    });
+
+    this.room.onPeerJoin((peerId: string) => {
+      console.log(`[Multiplayer] Peer joined: ${peerId}`);
+    });
+    
+    this.room.onPeerLeave((peerId: string) => {
+      console.log(`[Multiplayer] Peer left: ${peerId}`);
+    });
   }
 
   send(msg: NetworkMessage) {
-    if (this.channel) {
-      this.channel.postMessage(msg);
+    if (this.sendAction) {
+      // Trystero broadcasts to all peers by default
+      this.sendAction(msg);
     }
   }
 
   disconnect() {
-    if (this.channel) {
-      this.channel.close();
-      this.channel = null;
+    if (this.room) {
+      console.log('[Multiplayer] Leaving room');
+      this.room.leave();
+      this.room = null;
+      this.sendAction = null;
     }
   }
 }
