@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef, useCallback } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { Question, Player } from '../types';
 import { ProgressBar } from './ProgressBar';
 import { Scoreboard } from './Scoreboard';
@@ -44,8 +44,11 @@ interface GameRoundProps {
   questionIndex: number;
   totalQuestions: number;
   players: Player[];
+  duration: number; // Duration from settings
+  startTime: number; // When the round actually started (server time)
   onAnswer: (correct: boolean) => void;
-  onTimeUp: () => void;
+  // Note: We don't handle "onTimeUp" locally to change state, 
+  // we just use it to disable input. The App/Host controls the flow.
 }
 
 export const GameRound: React.FC<GameRoundProps> = ({ 
@@ -53,27 +56,24 @@ export const GameRound: React.FC<GameRoundProps> = ({
   questionIndex, 
   totalQuestions, 
   players,
-  onAnswer,
-  onTimeUp 
+  duration,
+  startTime,
+  onAnswer
 }) => {
   const [inputVal, setInputVal] = useState('');
-  const [gameState, setGameState] = useState<'playing' | 'success' | 'failed'>('playing');
+  const [gameState, setGameState] = useState<'playing' | 'success' | 'failed' | 'waiting'>('playing');
   const [shake, setShake] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
-  const [roundStartTime, setRoundStartTime] = useState(Date.now());
 
-  // Reset state when question changes
+  // If question ID changes, reset local state
   useEffect(() => {
     setInputVal('');
     setGameState('playing');
     setShake(false);
-    setRoundStartTime(Date.now());
-    
-    // Auto-focus input
     setTimeout(() => {
         inputRef.current?.focus();
     }, 100);
-  }, [question]);
+  }, [question.id]);
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -81,24 +81,19 @@ export const GameRound: React.FC<GameRoundProps> = ({
 
     if (checkSimilarity(inputVal, question.answer)) {
       setGameState('success');
-      // Delay slightly to show success state before triggering parent
-      setTimeout(() => {
-        onAnswer(true);
-      }, 1000);
+      onAnswer(true);
     } else {
       setShake(true);
       setTimeout(() => setShake(false), 500);
     }
   };
 
-  // Wrap callbacks for ProgressBar to avoid re-renders resetting it
-  const handleProgressComplete = useCallback(() => {
-    if (gameState !== 'playing') return;
-    setGameState('failed');
-    setTimeout(() => {
-        onTimeUp();
-    }, 2500); 
-  }, [gameState, onTimeUp]);
+  const handleTimeComplete = () => {
+    if (gameState === 'playing') {
+       setGameState('failed');
+       // Logic handled by Host
+    }
+  };
 
   return (
     <div className="w-full max-w-6xl mx-auto flex flex-col md:flex-row h-full gap-6 pb-6 p-4">
@@ -108,17 +103,19 @@ export const GameRound: React.FC<GameRoundProps> = ({
         {/* Header */}
         <div className="flex justify-between items-center mb-4">
             <div className="bg-black/30 px-4 py-2 rounded-full font-bold text-lg border border-white/10">
-            Q: {questionIndex + 1} / {totalQuestions}
+            Q: {questionIndex + 1} / {totalQuestions > 0 ? totalQuestions : '?'}
             </div>
-            {/* Show local player status if needed, or rely on scoreboard */}
+            <div className="text-sm font-bold opacity-60 uppercase tracking-widest">
+                {question.category || 'General'}
+            </div>
         </div>
 
         {/* Timer */}
         <ProgressBar 
-            duration={15} 
+            duration={duration} 
             isActive={gameState === 'playing'} 
-            startTime={roundStartTime}
-            onComplete={handleProgressComplete}
+            startTime={startTime}
+            onComplete={handleTimeComplete}
         />
 
         {/* Question Content */}
@@ -143,25 +140,19 @@ export const GameRound: React.FC<GameRoundProps> = ({
                         {question.content}
                     </div>
                 )}
-                
-                {question.category && (
-                    <div className="inline-block bg-blue-600/50 px-3 py-1 rounded-full text-sm font-bold uppercase tracking-wider mb-2">
-                        {question.category}
-                    </div>
-                )}
             </div>
 
             {/* Status Messages */}
-            {gameState === 'failed' && (
-                <div className="animate-pop mt-4 bg-red-600/90 text-white px-8 py-4 rounded-xl shadow-2xl border-2 border-red-400 absolute bottom-10">
-                    <div className="text-sm uppercase tracking-widest opacity-80 mb-1">Correct Answer</div>
-                    <div className="text-3xl font-black">{question.answer}</div>
+            {gameState === 'success' && (
+                <div className="animate-pop mt-4 bg-green-500/90 text-white px-8 py-4 rounded-xl shadow-2xl border-2 border-green-400 absolute bottom-10 z-10">
+                    <div className="text-4xl font-black">CORRECT!</div>
+                    <div className="text-sm font-bold text-center mt-1 opacity-80">Waiting for others...</div>
                 </div>
             )}
-            
-            {gameState === 'success' && (
-                <div className="animate-pop mt-4 bg-green-500/90 text-white px-8 py-4 rounded-xl shadow-2xl border-2 border-green-400 absolute bottom-10">
-                    <div className="text-4xl font-black">CORRECT!</div>
+             {gameState === 'failed' && (
+                <div className="animate-pop mt-4 bg-red-500/90 text-white px-8 py-4 rounded-xl shadow-2xl border-2 border-red-400 absolute bottom-10 z-10">
+                    <div className="text-4xl font-black">TIME UP!</div>
+                    <div className="text-lg font-bold text-center mt-1">Answer: {question.answer}</div>
                 </div>
             )}
         </div>
@@ -186,18 +177,9 @@ export const GameRound: React.FC<GameRoundProps> = ({
                     autoComplete="off"
                     autoFocus
                 />
-                
-                {gameState === 'playing' && (
-                    <button 
-                        type="submit"
-                        className="absolute right-3 top-3 bottom-3 bg-indigo-600 hover:bg-indigo-500 text-white px-6 rounded-xl font-bold shadow-md transition-colors uppercase tracking-wider"
-                    >
-                        Guess
-                    </button>
-                )}
             </form>
             <div className="text-center mt-3 text-white/40 text-sm font-medium">
-                Press Enter to submit • Spelling tolerant
+                10 Points per correct answer
             </div>
         </div>
       </div>

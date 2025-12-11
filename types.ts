@@ -6,7 +6,7 @@ export interface Question {
   category?: string;
 }
 
-export type GameStatus = 'lobby' | 'generating' | 'playing' | 'round_result' | 'game_over';
+export type GameStatus = 'landing' | 'lobby' | 'generating' | 'playing' | 'round_result' | 'game_over';
 
 export interface Player {
   id: string;
@@ -14,11 +14,24 @@ export interface Player {
   avatar: string;
   score: number;
   streak: number;
-  isBot?: boolean;
+  isHost: boolean;
+  isReady: boolean;
+  hasAnsweredRound: boolean; // Did they answer the current question correctly?
 }
 
-export interface GameConfig {
-  roundDuration: number; // Seconds
-  totalRounds: number;
-  topic: string;
+export interface GameSettings {
+  roundDuration: number; // Seconds (e.g. 10, 15, 20)
+  pointsToWin: number; // e.g. 50, 100
+  deckType: 'classic' | 'ai';
+  aiTopic: string;
+}
+
+export interface GameState {
+  roomId: string;
+  status: GameStatus;
+  players: Player[];
+  currentQuestionIndex: number;
+  questions: Question[];
+  settings: GameSettings;
+  roundStartTime: number;
 }

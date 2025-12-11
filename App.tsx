@@ -1,121 +1,300 @@
-import React, { useState, useEffect } from 'react';
-import { GameStatus, Player, Question } from './types';
-import { DEFAULT_QUESTIONS, AVATARS } from './constants';
+import React, { useState, useEffect, useRef } from 'react';
+import { GameStatus, Player, Question, GameState, GameSettings } from './types';
+import { DEFAULT_QUESTIONS } from './constants';
+import { generateQuestions } from './services/geminiService';
+import { multiplayer, NetworkMessage } from './services/multiplayer';
+import { LandingPage } from './components/LandingPage';
 import { Lobby } from './components/Lobby';
 import { GameRound } from './components/GameRound';
 import { GameOver } from './components/GameOver';
 
-// Mock Bots for simulated multiplayer
-const BOTS: Player[] = [
-    { id: 'b1', name: 'QuizBot', avatar: '🤖', score: 0, streak: 0, isBot: true },
-    { id: 'b2', name: 'Speedy', avatar: '⚡', score: 0, streak: 0, isBot: true },
-    { id: 'b3', name: 'Smarty', avatar: '🧠', score: 0, streak: 0, isBot: true }
-];
+// --- Default State ---
+const INITIAL_SETTINGS: GameSettings = {
+  roundDuration: 15,
+  pointsToWin: 50,
+  deckType: 'classic',
+  aiTopic: ''
+};
 
 const App: React.FC = () => {
-  const [status, setStatus] = useState<GameStatus>('lobby');
-  const [questions, setQuestions] = useState<Question[]>(DEFAULT_QUESTIONS);
-  const [currentQIndex, setCurrentQIndex] = useState(0);
+  // Local Player Info
+  const [localPlayerId] = useState(() => Math.random().toString(36).substring(2, 9));
   
-  // Players state includes the local user and bots
-  const [players, setPlayers] = useState<Player[]>([...BOTS]);
-  const [localPlayerId, setLocalPlayerId] = useState<string>('');
+  // Game State (The "Truth")
+  const [gameState, setGameState] = useState<GameState>({
+    roomId: '',
+    status: 'landing',
+    players: [],
+    currentQuestionIndex: 0,
+    questions: [],
+    settings: INITIAL_SETTINGS,
+    roundStartTime: 0
+  });
 
-  // Handle URL params for room code (Visual only)
+  // Hack for components to access ID easily
+  (window as any).localPlayerId = localPlayerId;
+
+  // Initial URL Check
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
     const room = params.get('room');
     if (room) {
-        console.log("Joined room:", room);
-        // In a real app, we would connect to websocket here
+      setGameState(prev => ({ ...prev, roomId: room }));
     }
   }, []);
 
-  const handleStartGame = (name: string, avatar: string, newQuestions: Question[]) => {
-    const myId = 'local-player';
-    setLocalPlayerId(myId);
+  // --- Networking & Logic ---
+
+  // 1. Listen for messages
+  useEffect(() => {
+    if (gameState.roomId) {
+      multiplayer.connect(gameState.roomId, handleNetworkMessage);
+    }
+    return () => multiplayer.disconnect();
+  }, [gameState.roomId]);
+
+  // 2. Handle Messages
+  const handleNetworkMessage = (msg: NetworkMessage) => {
+    switch (msg.type) {
+      case 'JOIN_REQUEST':
+        // If I am the host, I receive join requests and reply with the full state
+        if (isLocalHost()) {
+          const newPlayer: Player = {
+            id: msg.senderId!,
+            name: msg.payload.name,
+            avatar: msg.payload.avatar,
+            score: 0,
+            streak: 0,
+            isHost: false,
+            isReady: false,
+            hasAnsweredRound: false
+          };
+          
+          // Check if already exists
+          const exists = gameState.players.find(p => p.id === newPlayer.id);
+          let updatedPlayers = gameState.players;
+          if (!exists) {
+            updatedPlayers = [...gameState.players, newPlayer];
+          }
+
+          const newState = { ...gameState, players: updatedPlayers };
+          updateAndBroadcastState(newState);
+        }
+        break;
+
+      case 'STATE_UPDATE':
+        // I am a guest, I receive the authoritative state from the host
+        // Important: Don't overwrite my local player ID concept, just the data
+        setGameState(msg.payload);
+        break;
+
+      case 'PLAYER_ACTION':
+        if (isLocalHost()) {
+          handlePlayerAction(msg.senderId!, msg.payload.action, msg.payload.data);
+        }
+        break;
+    }
+  };
+
+  // Helper to check if THIS browser tab is the host
+  const isLocalHost = () => {
+    const host = gameState.players.find(p => p.isHost);
+    return host?.id === localPlayerId;
+  };
+
+  // 3. Host Logic: Handle Actions
+  const handlePlayerAction = (playerId: string, action: string, data: any) => {
+    let newState = { ...gameState };
+
+    if (action === 'READY_TOGGLE') {
+      newState.players = newState.players.map(p => 
+        p.id === playerId ? { ...p, isReady: !p.isReady } : p
+      );
+    } 
+    else if (action === 'ANSWER_CORRECT') {
+      newState.players = newState.players.map(p => 
+        p.id === playerId ? { ...p, score: p.score + 10, hasAnsweredRound: true } : p
+      );
+    }
+
+    updateAndBroadcastState(newState);
+  };
+
+  // 4. Host Logic: Game Loop / Timer
+  // We use a ref to break the closure of setInterval so it sees fresh state
+  const stateRef = useRef(gameState);
+  stateRef.current = gameState;
+
+  useEffect(() => {
+    if (!isLocalHost() || gameState.status !== 'playing') return;
+
+    const interval = setInterval(() => {
+        const current = stateRef.current;
+        const elapsed = (Date.now() - current.roundStartTime) / 1000;
+        
+        // Check 1: Did everyone answer?
+        const allAnswered = current.players.every(p => p.hasAnsweredRound);
+        
+        // Check 2: Time up?
+        const timeUp = elapsed >= current.settings.roundDuration;
+
+        if (allAnswered || timeUp) {
+            // End Round logic
+            handleRoundEnd();
+        }
+    }, 500);
+
+    return () => clearInterval(interval);
+  }, [gameState.status, gameState.roundStartTime]); // Re-bind if status changes to playing
+
+  const handleRoundEnd = () => {
+    const current = stateRef.current;
     
-    const me: Player = { id: myId, name, avatar, score: 0, streak: 0 };
+    // Check Win Condition
+    const winner = current.players.find(p => p.score >= current.settings.pointsToWin);
     
-    // Reset bot scores
-    const resetBots = BOTS.map(b => ({ ...b, score: 0, streak: 0 }));
+    if (winner || current.currentQuestionIndex >= current.questions.length - 1) {
+        updateAndBroadcastState({
+            ...current,
+            status: 'game_over'
+        });
+    } else {
+        // Next Question
+        // Reset answered flags
+        const resetPlayers = current.players.map(p => ({...p, hasAnsweredRound: false}));
+        
+        updateAndBroadcastState({
+            ...current,
+            players: resetPlayers,
+            currentQuestionIndex: current.currentQuestionIndex + 1,
+            roundStartTime: Date.now()
+        });
+    }
+  };
+
+  // 5. Utility: Update State locally AND send to everyone
+  const updateAndBroadcastState = (newState: GameState) => {
+    setGameState(newState);
+    multiplayer.send({
+      type: 'STATE_UPDATE',
+      payload: newState
+    });
+  };
+
+
+  // --- User Interaction Handlers ---
+
+  const handleCreateGame = (name: string, avatar: string) => {
+    const roomId = Math.random().toString(36).substring(2, 8).toUpperCase();
+    const hostPlayer: Player = {
+        id: localPlayerId,
+        name,
+        avatar,
+        score: 0,
+        streak: 0,
+        isHost: true,
+        isReady: true,
+        hasAnsweredRound: false
+    };
+
+    setGameState({
+        ...gameState,
+        roomId,
+        status: 'lobby',
+        players: [hostPlayer],
+        questions: DEFAULT_QUESTIONS,
+        settings: INITIAL_SETTINGS
+    });
     
-    setPlayers([me, ...resetBots]);
-    setQuestions(newQuestions);
-    setCurrentQIndex(0);
-    setStatus('playing');
+    // Update URL without reload
+    window.history.pushState({}, '', `?room=${roomId}`);
+  };
+
+  const handleJoinGame = (name: string, avatar: string, code: string) => {
+    // Initial state is mostly empty, we wait for sync
+    setGameState(prev => ({ ...prev, roomId: code, status: 'lobby' }));
+    
+    // Send request
+    multiplayer.connect(code, handleNetworkMessage);
+    multiplayer.send({
+        type: 'JOIN_REQUEST',
+        payload: { name, avatar },
+        senderId: localPlayerId
+    });
+  };
+
+  const handleUpdateSettings = (newSettings: GameSettings) => {
+    if (!isLocalHost()) return;
+    updateAndBroadcastState({ ...gameState, settings: newSettings });
+  };
+
+  const handleToggleReady = () => {
+    if (isLocalHost()) return; // Host is always ready effectively (they start)
+    multiplayer.send({
+        type: 'PLAYER_ACTION',
+        payload: { action: 'READY_TOGGLE' },
+        senderId: localPlayerId
+    });
+  };
+
+  const handleStartGame = async () => {
+    if (!isLocalHost()) return;
+    
+    let finalQuestions = gameState.questions;
+
+    // Handle AI Generation if needed
+    if (gameState.settings.deckType === 'ai' && gameState.settings.aiTopic) {
+        // Temporarily set status to generating to show loading UI if we wanted
+        try {
+            const generated = await generateQuestions(gameState.settings.aiTopic);
+            if (generated.length > 0) finalQuestions = generated;
+        } catch (e) {
+            console.error("AI Gen failed, using default");
+        }
+    }
+
+    updateAndBroadcastState({
+        ...gameState,
+        status: 'playing',
+        questions: finalQuestions,
+        currentQuestionIndex: 0,
+        roundStartTime: Date.now(),
+        players: gameState.players.map(p => ({...p, score: 0, hasAnsweredRound: false}))
+    });
   };
 
   const handleAnswer = (correct: boolean) => {
     if (correct) {
-      updateScore(localPlayerId, true);
-    } else {
-      updateScore(localPlayerId, false);
-    }
-    // Note: In single player flow, we wait for answer to end round. 
-    // In multiplayer usually round ends for everyone. 
-    // Here we just proceed to next question after the delay in GameRound.
-    handleNextQuestion();
-  };
-
-  const updateScore = (pid: string, success: boolean) => {
-    setPlayers(prev => prev.map(p => {
-        if (p.id === pid) {
-            const newStreak = success ? p.streak + 1 : 0;
-            const points = success ? 10 : 0;
-            return { ...p, score: p.score + points, streak: newStreak };
+        if (isLocalHost()) {
+            handlePlayerAction(localPlayerId, 'ANSWER_CORRECT', null);
+        } else {
+            multiplayer.send({
+                type: 'PLAYER_ACTION',
+                payload: { action: 'ANSWER_CORRECT' },
+                senderId: localPlayerId
+            });
         }
-        return p;
-    }));
-  };
-
-  const handleTimeUp = () => {
-    updateScore(localPlayerId, false);
-    handleNextQuestion();
-  };
-
-  const handleNextQuestion = () => {
-    // Simulate Bot Answers for the COMPLETED round
-    // We do this right before moving to next to simulate they played during the round
-    simulateBotRound();
-
-    if (currentQIndex + 1 < questions.length) {
-      setCurrentQIndex(prev => prev + 1);
-    } else {
-      setStatus('game_over');
     }
-  };
-
-  // Logic to simulate bots getting points randomly
-  const simulateBotRound = () => {
-    setPlayers(prev => prev.map(p => {
-        if (p.isBot) {
-            // 40% chance bot gets it right
-            const isCorrect = Math.random() > 0.6; 
-            if (isCorrect) {
-                return { ...p, score: p.score + 10 };
-            }
-        }
-        return p;
-    }));
   };
 
   const handleRestart = () => {
-    // Reset scores
-    setPlayers(prev => prev.map(p => ({ ...p, score: 0, streak: 0 })));
-    setCurrentQIndex(0);
-    setStatus('playing');
+      // Return to lobby
+       updateAndBroadcastState({
+        ...gameState,
+        status: 'lobby',
+        players: gameState.players.map(p => ({...p, score: 0, isReady: false}))
+    });
   };
-
+  
   const handleHome = () => {
-    setStatus('lobby');
+    window.location.href = window.location.origin;
   };
 
-  const localPlayer = players.find(p => p.id === localPlayerId);
+
+  // --- Render ---
 
   return (
-    <div className="min-h-screen w-full bg-gradient-to-br from-indigo-900 via-purple-900 to-fuchsia-900 text-white flex flex-col">
-      {/* Background decorations */}
+    <div className="min-h-screen w-full bg-gradient-to-br from-indigo-900 via-purple-900 to-fuchsia-900 text-white flex flex-col font-fredoka">
       <div className="fixed inset-0 overflow-hidden pointer-events-none">
         <div className="absolute top-10 left-10 w-32 h-32 bg-purple-500 rounded-full mix-blend-multiply filter blur-3xl opacity-20 animate-pulse"></div>
         <div className="absolute bottom-10 right-10 w-64 h-64 bg-blue-500 rounded-full mix-blend-multiply filter blur-3xl opacity-20 animate-pulse" style={{ animationDelay: '1s' }}></div>
@@ -123,34 +302,49 @@ const App: React.FC = () => {
 
       <div className="relative z-10 flex-1 flex flex-col p-4 md:p-6">
         
-        {status === 'lobby' && (
+        {gameState.status === 'landing' && (
+             <div className="flex-1 flex items-center justify-center">
+                <LandingPage 
+                    onCreate={handleCreateGame}
+                    onJoin={handleJoinGame}
+                    initialCode={gameState.roomId}
+                />
+            </div>
+        )}
+
+        {gameState.status === 'lobby' && (
           <div className="flex-1 flex items-center justify-center">
             <Lobby 
-                onStartGame={handleStartGame} 
-                defaultQuestions={DEFAULT_QUESTIONS}
-                players={BOTS}
+                roomId={gameState.roomId}
+                isHost={isLocalHost()}
+                players={gameState.players}
+                settings={gameState.settings}
+                onUpdateSettings={handleUpdateSettings}
+                onReady={handleToggleReady}
+                onStart={handleStartGame}
             />
           </div>
         )}
 
-        {status === 'playing' && (
+        {gameState.status === 'playing' && (
           <GameRound 
-            question={questions[currentQIndex]}
-            questionIndex={currentQIndex}
-            totalQuestions={questions.length}
-            players={players}
+            question={gameState.questions[gameState.currentQuestionIndex]}
+            questionIndex={gameState.currentQuestionIndex}
+            totalQuestions={gameState.questions.length}
+            players={gameState.players}
+            duration={gameState.settings.roundDuration}
+            startTime={gameState.roundStartTime}
             onAnswer={handleAnswer}
-            onTimeUp={handleTimeUp}
           />
         )}
 
-        {status === 'game_over' && localPlayer && (
+        {gameState.status === 'game_over' && (
           <div className="flex-1 flex items-center justify-center">
-            <GameOver 
-                score={localPlayer.score} 
-                totalQuestions={questions.length} 
-                player={localPlayer.name}
-                onRestart={handleRestart}
+             <GameOver 
+                score={gameState.players.find(p => p.id === localPlayerId)?.score || 0}
+                totalQuestions={gameState.questions.length} 
+                player={gameState.players.find(p => p.id === localPlayerId)?.name || 'You'}
+                onRestart={isLocalHost() ? handleRestart : undefined}
                 onHome={handleHome}
             />
           </div>
