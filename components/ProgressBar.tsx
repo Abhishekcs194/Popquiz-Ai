@@ -8,12 +8,13 @@ interface ProgressBarProps {
 }
 
 export const ProgressBar: React.FC<ProgressBarProps> = ({ duration, onComplete, startTime, isActive }) => {
-  const [width, setWidth] = useState(100);
+  const [percentage, setPercentage] = useState(100);
   const [timeLeft, setTimeLeft] = useState(duration);
   const animationFrameRef = useRef<number>(0);
 
   useEffect(() => {
     if (!isActive) {
+      setPercentage(100);
       return;
     }
 
@@ -21,9 +22,9 @@ export const ProgressBar: React.FC<ProgressBarProps> = ({ duration, onComplete, 
       const now = Date.now();
       const elapsed = (now - startTime) / 1000;
       const remaining = Math.max(0, duration - elapsed);
-      const percentage = (remaining / duration) * 100;
+      const newPct = (remaining / duration) * 100;
       
-      setWidth(percentage);
+      setPercentage(newPct);
       setTimeLeft(Math.ceil(remaining));
 
       if (remaining <= 0) {
@@ -43,22 +44,30 @@ export const ProgressBar: React.FC<ProgressBarProps> = ({ duration, onComplete, 
   }, [isActive, duration, startTime, onComplete]);
 
   // Determine color based on time remaining
-  let color = "bg-green-500";
-  if (width < 60) color = "bg-yellow-400";
-  if (width < 30) color = "bg-red-500";
+  let barColor = "bg-gradient-to-r from-emerald-400 to-emerald-600";
+  let textColor = "text-white";
+  
+  if (percentage < 60) {
+      barColor = "bg-gradient-to-r from-yellow-400 to-orange-500";
+  }
+  if (percentage < 30) {
+      barColor = "bg-gradient-to-r from-red-500 to-red-700";
+      textColor = "text-red-400 animate-pulse";
+  }
 
   return (
-    <div className="flex items-center gap-4 mb-6 w-full">
-      <div className="flex-1 h-6 bg-black/40 rounded-full overflow-hidden shadow-inner border border-white/10 relative">
-        <div 
-          className={`h-full ${color} transition-all duration-75 ease-linear shadow-[0_0_10px_rgba(255,255,255,0.3)]`} 
-          style={{ width: `${width}%` }}
-        />
-        {/* Striped pattern overlay */}
-        <div className="absolute inset-0 bg-[url('data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAQAAAAECAYAAACp8Z5+AAAAIklEQVQIW2NkQAKrVq36zwjjgzhhYWGMYAEYB8RmROaABADeOQ8CXl/xfgAAAABJRU5ErkJggg==')] opacity-20 pointer-events-none"></div>
+    <div className="flex flex-col w-full mb-6">
+      <div className="flex justify-between items-end mb-1 px-1">
+        <span className="text-xs font-bold uppercase tracking-widest text-white/50">Time Remaining</span>
+        <span className={`font-mono font-black text-3xl leading-none ${textColor}`}>{timeLeft}s</span>
       </div>
-      <div className={`font-mono font-black text-2xl w-12 text-center drop-shadow-md ${timeLeft <= 5 ? 'text-red-400 animate-pulse' : 'text-white'}`}>
-        {timeLeft}
+      <div className="h-4 bg-black/40 rounded-full overflow-hidden border border-white/10 p-0.5">
+        <div 
+          className={`h-full rounded-full ${barColor} transition-all duration-75 ease-linear shadow-[0_0_15px_rgba(255,255,255,0.2)] relative`} 
+          style={{ width: `${percentage}%` }}
+        >
+            <div className="absolute inset-0 bg-white/20" style={{ backgroundImage: 'linear-gradient(45deg,rgba(255,255,255,.15) 25%,transparent 25%,transparent 50%,rgba(255,255,255,.15) 50%,rgba(255,255,255,.15) 75%,transparent 75%,transparent)', backgroundSize: '1rem 1rem' }}></div>
+        </div>
       </div>
     </div>
   );

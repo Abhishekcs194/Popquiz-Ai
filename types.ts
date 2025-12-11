@@ -1,6 +1,6 @@
 export interface Question {
   id: string;
-  type: 'image' | 'text' | 'emoji';
+  type: 'image' | 'text'; // Removed 'emoji'
   content: string; // URL for image, or text string
   answer: string;
   category?: string;
@@ -17,6 +17,7 @@ export interface Player {
   isHost: boolean;
   isReady: boolean;
   hasAnsweredRound: boolean; // Did they answer the current question correctly?
+  lastWrongGuess?: string; // The text of their last wrong answer
   isBot?: boolean;
 }
 

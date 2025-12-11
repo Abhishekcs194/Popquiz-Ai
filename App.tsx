@@ -22,6 +22,7 @@ const App: React.FC = () => {
   
   // Refs
   const pendingJoinRef = useRef<{name: string, avatar: string} | null>(null);
+  const isGeneratingMoreRef = useRef(false); // Flag to prevent concurrent generations
   const gameStateRef = useRef<GameState>({
     roomId: '',
     status: 'landing',
@@ -48,7 +49,6 @@ const App: React.FC = () => {
     return newState;
   };
 
-  // Hack for components to access ID easily
   (window as any).localPlayerId = localPlayerId;
 
   // Initial URL Check
@@ -65,7 +65,6 @@ const App: React.FC = () => {
   // 1. Connection Lifecycle
   useEffect(() => {
     if (gameState.roomId) {
-      // Connect to the P2P Mesh
       multiplayer.connect(gameState.roomId, (msg) => handleNetworkMessage(msg));
     }
     return () => multiplayer.disconnect();
@@ -164,6 +163,13 @@ const App: React.FC = () => {
             stateChanged = true;
         }
     }
+    else if (action === 'ANSWER_WRONG') {
+        // data is the wrong guess string
+        newPlayers = newPlayers.map(p => 
+            p.id === playerId ? { ...p, lastWrongGuess: data } : p
+        );
+        stateChanged = true;
+    }
 
     if (stateChanged) {
         const newState = updateState({ players: newPlayers });
@@ -194,7 +200,42 @@ const App: React.FC = () => {
     return () => clearInterval(interval);
   }, [gameState.status]);
 
+  // Infinite Generation Logic (Background)
+  const checkForMoreQuestions = async () => {
+      if (isGeneratingMoreRef.current) return;
+      const current = gameStateRef.current;
+      
+      // If using AI deck and we have fewer than 5 questions left
+      if (current.settings.deckType === 'ai' && 
+          (current.questions.length - current.currentQuestionIndex) < 5) {
+          
+          console.log("[Host] Low on questions, generating more...");
+          isGeneratingMoreRef.current = true;
+          
+          try {
+              // Collect existing answers to avoid duplicates
+              const existingAnswers = current.questions.map(q => q.answer);
+              const newQs = await generateQuestions(current.settings.aiTopic, 15, existingAnswers);
+              
+              if (newQs.length > 0) {
+                  const newState = updateState(prev => ({
+                      questions: [...prev.questions, ...newQs]
+                  }));
+                  broadcast(newState);
+              }
+          } catch (e) {
+              console.error("Bg Gen failed", e);
+          } finally {
+              isGeneratingMoreRef.current = false;
+          }
+      }
+  };
+
+
   const handleRoundEnd = () => {
+    // Check if we need more questions
+    checkForMoreQuestions();
+
     // 1. Transition to Round Result (Pause for 3 seconds)
     const newState = updateState({ status: 'round_result' });
     broadcast(newState);
@@ -209,36 +250,25 @@ const App: React.FC = () => {
       const current = gameStateRef.current;
       
       // Determine if anyone has won
-      // Logic:
-      // 1. Filter players who reached the win score
-      // 2. If nobody -> Next Round
-      // 3. If 1 person -> Winner -> Game Over
-      // 4. If 2+ people -> Check if there is a unique highest score. 
-      //    If yes -> Winner. If no (tie) -> Continue until tie broken.
-      
       const potentialWinners = current.players.filter(p => p.score >= current.settings.pointsToWin);
-      
       let isGameOver = false;
 
       if (potentialWinners.length === 1) {
-          // Explicit winner
           isGameOver = true;
       } else if (potentialWinners.length > 1) {
-          // Tie-breaker logic
+          // Tie-breaker
           const sorted = potentialWinners.sort((a,b) => b.score - a.score);
           const topScore = sorted[0].score;
           const runnersUp = sorted.filter(p => p.score === topScore);
           
           if (runnersUp.length === 1) {
-              // Unique highest score found
               isGameOver = true;
           } else {
-              // Still a tie for 1st place, continue playing
-              isGameOver = false;
+              isGameOver = false; // Continue if tie
           }
       }
 
-      // Force game over if we run out of questions regardless of score
+      // Hard stop only if we genuinely have 0 questions left (shouldn't happen with infinite mode)
       if (current.currentQuestionIndex >= current.questions.length - 1) {
           isGameOver = true;
       }
@@ -248,7 +278,13 @@ const App: React.FC = () => {
           broadcast(newState);
       } else {
           // Reset for next question
-          const resetPlayers = current.players.map(p => ({...p, hasAnsweredRound: false}));
+          // Also clear lastWrongGuess
+          const resetPlayers = current.players.map(p => ({
+              ...p, 
+              hasAnsweredRound: false,
+              lastWrongGuess: undefined 
+          }));
+          
           const newState = updateState({
               players: resetPlayers,
               currentQuestionIndex: current.currentQuestionIndex + 1,
@@ -327,8 +363,7 @@ const App: React.FC = () => {
         try {
             updateState({ status: 'generating' as GameStatus }); 
             
-            // Calculate how many questions we need:
-            // (Win Score / 10 points per Q) + 15 buffer
+            // Initial batch: Win Score / 10 + buffer
             const countNeeded = Math.ceil(gameState.settings.pointsToWin / 10) + 15;
             
             const generated = await generateQuestions(gameState.settings.aiTopic, countNeeded);
@@ -343,12 +378,17 @@ const App: React.FC = () => {
         questions: finalQuestions,
         currentQuestionIndex: 0,
         roundStartTime: Date.now(),
-        players: gameState.players.map(p => ({...p, score: 0, hasAnsweredRound: false}))
+        players: gameState.players.map(p => ({
+            ...p, 
+            score: 0, 
+            hasAnsweredRound: false,
+            lastWrongGuess: undefined
+        }))
     });
     broadcast(newState);
   };
 
-  const handleAnswer = (correct: boolean) => {
+  const handleAnswer = (correct: boolean, guess?: string) => {
     if (correct) {
         if (isLocalHost(gameState.players)) {
             handlePlayerAction(localPlayerId, 'ANSWER_CORRECT', null);
@@ -359,13 +399,31 @@ const App: React.FC = () => {
                 senderId: localPlayerId
             });
         }
+    } else if (guess) {
+        // Broadcast wrong answer for display
+        if (isLocalHost(gameState.players)) {
+            handlePlayerAction(localPlayerId, 'ANSWER_WRONG', guess);
+        } else {
+             multiplayer.send({
+                type: 'PLAYER_ACTION',
+                payload: { action: 'ANSWER_WRONG', data: guess },
+                senderId: localPlayerId
+            });
+        }
     }
   };
 
   const handleRestart = () => {
-       const newState = updateState({
+     // Return everyone to lobby
+     const newState = updateState({
         status: 'lobby',
-        players: gameState.players.map(p => ({...p, score: 0, isReady: false}))
+        players: gameState.players.map(p => ({
+            ...p, 
+            score: 0, 
+            isReady: false, 
+            hasAnsweredRound: false,
+            lastWrongGuess: undefined
+        }))
     });
     broadcast(newState);
   };
@@ -446,11 +504,10 @@ const App: React.FC = () => {
         {gameState.status === 'game_over' && (
           <div className="flex-1 flex items-center justify-center">
              <GameOver 
-                score={gameState.players.find(p => p.id === localPlayerId)?.score || 0}
-                totalQuestions={gameState.questions.length} 
-                player={gameState.players.find(p => p.id === localPlayerId)?.name || 'You'}
-                onRestart={isLocalHost(gameState.players) ? handleRestart : undefined}
+                players={gameState.players}
+                onRestart={isLocalHost(gameState.players) ? handleRestart : () => {}}
                 onHome={handleHome}
+                isHost={isLocalHost(gameState.players)}
             />
           </div>
         )}

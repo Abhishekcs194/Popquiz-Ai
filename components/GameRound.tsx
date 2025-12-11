@@ -42,18 +42,17 @@ const checkSimilarity = (input: string, target: string): boolean => {
 interface GameRoundProps {
   question: Question;
   questionIndex: number;
-  totalQuestions: number;
+  totalQuestions: number; // Note: We might ignore this in display now
   players: Player[];
   duration: number; // Duration from settings
   startTime: number; // When the round actually started (server time)
-  onAnswer: (correct: boolean) => void;
+  onAnswer: (correct: boolean, guess?: string) => void;
   gameStatus: GameStatus;
 }
 
 export const GameRound: React.FC<GameRoundProps> = ({ 
   question, 
   questionIndex, 
-  totalQuestions, 
   players,
   duration,
   startTime,
@@ -81,15 +80,18 @@ export const GameRound: React.FC<GameRoundProps> = ({
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    if (localState !== 'playing' || showResult) return;
+    if (localState !== 'playing' || showResult || !inputVal.trim()) return;
 
     if (checkSimilarity(inputVal, question.answer)) {
       setLocalState('success');
       onAnswer(true);
-      // Keep answer if correct so they see what they typed
     } else {
       setShake(true);
       setTimeout(() => setShake(false), 500);
+      
+      // Notify parent of wrong answer (for display)
+      onAnswer(false, inputVal.trim());
+      
       // CLEAR INPUT immediately to allow rapid re-guessing
       setInputVal('');
     }
@@ -110,7 +112,7 @@ export const GameRound: React.FC<GameRoundProps> = ({
         {/* Header */}
         <div className="flex justify-between items-center mb-2">
             <div className="bg-black/30 px-4 py-2 rounded-full font-bold text-lg border border-white/10">
-            Q: {questionIndex + 1} / {totalQuestions > 0 ? totalQuestions : '?'}
+             Question #{questionIndex + 1}
             </div>
             <div className="text-sm font-bold opacity-60 uppercase tracking-widest">
                 {question.category || 'General'}
@@ -126,7 +128,7 @@ export const GameRound: React.FC<GameRoundProps> = ({
         />
 
         {/* Question Content */}
-        <div className="flex-1 flex flex-col items-center justify-center min-h-[250px] mb-4 relative bg-black/10 rounded-3xl border border-white/5 p-4 overflow-hidden">
+        <div className="flex-1 flex flex-col items-center justify-center min-h-[250px] mb-4 relative bg-black/10 rounded-3xl border border-white/5 p-4 overflow-hidden shadow-inner">
             
             {/* The Question */}
             <div className={`animate-pop w-full max-w-2xl text-center transition-all duration-500 ${showResult ? 'blur-sm scale-95 opacity-50' : ''}`}>
@@ -139,11 +141,7 @@ export const GameRound: React.FC<GameRoundProps> = ({
                         />
                     </div>
                 )}
-                {question.type === 'emoji' && (
-                    <div className="text-8xl md:text-9xl tracking-widest drop-shadow-2xl bg-white/10 p-8 rounded-3xl border border-white/20 backdrop-blur-sm inline-block mb-4">
-                        {question.content}
-                    </div>
-                )}
+                {/* Fallback for emoji if old questions exist, but mainly text now */}
                 {question.type === 'text' && (
                     <div className="text-3xl md:text-5xl font-black leading-tight drop-shadow-lg px-4 mb-8">
                         {question.content}

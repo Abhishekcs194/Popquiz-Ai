@@ -17,7 +17,7 @@ export const DEFAULT_QUESTIONS: Question[] = [
   },
   {
     id: '3',
-    type: 'emoji',
+    type: 'text',
     content: '⚡🧙‍♂️👓🏫',
     answer: 'Harry Potter',
     category: 'Movies'
@@ -38,7 +38,7 @@ export const DEFAULT_QUESTIONS: Question[] = [
   },
   {
     id: '6',
-    type: 'emoji',
+    type: 'text',
     content: '🚢🧊💔🎻',
     answer: 'Titanic',
     category: 'Movies'
@@ -52,7 +52,7 @@ export const DEFAULT_QUESTIONS: Question[] = [
   },
   {
     id: '8',
-    type: 'emoji',
+    type: 'text',
     content: '🦖🦕公园',
     answer: 'Jurassic Park',
     category: 'Movies'
