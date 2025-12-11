@@ -55,7 +55,7 @@ const checkAnswer = (input: string, question: Question): boolean => {
 interface GameRoundProps {
   question: Question;
   questionIndex: number;
-  totalQuestions: number; // Note: We might ignore this in display now
+  totalQuestions: number; 
   players: Player[];
   duration: number; // Duration from settings
   startTime: number; // When the round actually started (server time)
@@ -75,26 +75,41 @@ export const GameRound: React.FC<GameRoundProps> = ({
   const [inputVal, setInputVal] = useState('');
   const [localState, setLocalState] = useState<'playing' | 'success' | 'failed'>('playing');
   const [shake, setShake] = useState(false);
+  const [isImageLoading, setIsImageLoading] = useState(false);
+  
   const inputRef = useRef<HTMLInputElement>(null);
-
   const showResult = gameStatus === 'round_result';
 
-  // If question ID changes, reset local state
+  // Logic: When question ID changes, reset everything
   useEffect(() => {
     if (gameStatus === 'playing') {
         setInputVal('');
         setLocalState('playing');
         setShake(false);
-        playSound.pop();
+        
+        // Reset image loading state based on type
+        if (question.type === 'image') {
+            setIsImageLoading(true);
+        } else {
+            setIsImageLoading(false);
+            playSound.pop(); // Play sound immediately for text
+        }
+
         setTimeout(() => {
             inputRef.current?.focus();
         }, 100);
     }
-  }, [question.id, gameStatus]);
+  }, [question.id, gameStatus, question.type]);
+
+  const handleImageLoad = () => {
+      setIsImageLoading(false);
+      playSound.pop();
+  };
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     if (localState !== 'playing' || showResult || !inputVal.trim()) return;
+    if (isImageLoading) return; // Prevent answering while loading
 
     if (checkAnswer(inputVal, question)) {
       setLocalState('success');
@@ -104,11 +119,7 @@ export const GameRound: React.FC<GameRoundProps> = ({
       setShake(true);
       playSound.wrong();
       setTimeout(() => setShake(false), 500);
-      
-      // Notify parent of wrong answer (for display)
       onAnswer(false, inputVal.trim());
-      
-      // CLEAR INPUT immediately to allow rapid re-guessing
       setInputVal('');
     }
   };
@@ -116,9 +127,11 @@ export const GameRound: React.FC<GameRoundProps> = ({
   const handleTimeComplete = () => {
     if (localState === 'playing') {
        setLocalState('failed');
-       // Logic handled by Host via App.tsx
     }
   };
+
+  // Pause the visual timer if image is still loading
+  const isTimerActive = gameStatus === 'playing' && localState === 'playing' && !isImageLoading;
 
   return (
     <div className="w-full max-w-6xl mx-auto flex flex-col md:flex-row h-full gap-6 pb-6 p-4">
@@ -138,7 +151,7 @@ export const GameRound: React.FC<GameRoundProps> = ({
         {/* Timer */}
         <ProgressBar 
             duration={duration} 
-            isActive={gameStatus === 'playing' && localState === 'playing'} 
+            isActive={isTimerActive} 
             startTime={startTime}
             onComplete={handleTimeComplete}
         />
@@ -150,15 +163,33 @@ export const GameRound: React.FC<GameRoundProps> = ({
             <div className={`animate-pop w-full max-w-2xl text-center transition-all duration-500 ${showResult ? 'blur-sm scale-95 opacity-50' : ''}`}>
                 {question.type === 'image' && (
                     <div className="flex flex-col items-center">
-                        {/* Display Question Text if available */}
+                        {/* Display Question Text */}
                         <div className="text-xl md:text-3xl font-bold mb-6 text-white drop-shadow-md">
                             {question.questionText || "What is this?"}
                         </div>
-                        <div className="relative inline-block group mb-4">
+                        
+                        <div className="relative inline-block group mb-4 min-h-[200px] flex items-center justify-center">
+                             {/* Loading Spinner */}
+                             {isImageLoading && (
+                                <div className="absolute inset-0 flex items-center justify-center">
+                                    <div className="w-12 h-12 border-4 border-white/30 border-t-yellow-400 rounded-full animate-spin"></div>
+                                </div>
+                            )}
+                            
+                            {/* 
+                                KEY PROP IS CRITICAL HERE:
+                                key={question.content} forces React to unmount the old img and mount a new one.
+                                This prevents the "previous image showing" ghosting effect.
+                            */}
                             <img 
+                                key={question.content} 
                                 src={question.content} 
+                                onLoad={handleImageLoad}
                                 alt="Question" 
-                                className="max-h-[350px] w-auto mx-auto rounded-xl shadow-2xl border-4 border-white object-contain bg-white"
+                                className={`
+                                    max-h-[350px] w-auto mx-auto rounded-xl shadow-2xl border-4 border-white object-contain bg-white transition-opacity duration-300
+                                    ${isImageLoading ? 'opacity-0' : 'opacity-100'}
+                                `}
                             />
                         </div>
                     </div>
@@ -209,15 +240,16 @@ export const GameRound: React.FC<GameRoundProps> = ({
                     type="text"
                     value={inputVal}
                     onChange={(e) => setInputVal(e.target.value)}
-                    disabled={localState !== 'playing' || showResult}
+                    disabled={localState !== 'playing' || showResult || isImageLoading}
                     className={`
                         w-full px-6 py-5 rounded-2xl text-2xl font-bold text-center outline-none border-4 shadow-2xl transition-all
                         placeholder-white/20
                         ${(localState === 'playing' && !showResult) ? 'bg-white text-indigo-900 border-white focus:border-yellow-400' : ''}
                         ${localState === 'success' ? 'bg-green-100 text-green-800 border-green-500' : ''}
                         ${localState === 'failed' || showResult ? 'bg-gray-700 text-gray-400 border-gray-600' : ''}
+                        ${isImageLoading ? 'opacity-50 cursor-wait' : ''}
                     `}
-                    placeholder={showResult ? "Round Over" : "Type your answer..."}
+                    placeholder={showResult ? "Round Over" : isImageLoading ? "Loading Image..." : "Type your answer..."}
                     autoComplete="off"
                     autoFocus
                 />

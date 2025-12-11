@@ -7,23 +7,21 @@ The goal is to generate fast-paced trivia where users TYPE the answer.
 
 RULES:
 1. **Bracket Logic**: The user input may contain brackets like "Pokemon(images)" or "History(easy)".
-   - If "(images)" is present for a topic, 100% of questions for that topic MUST be 'image' type.
-   - If "(easy)", "(hard)", etc. are present, adjust difficulty accordingly.
+   - If "(images)" is present, 100% of questions MUST be 'image' type.
    
-2. **Image Generation**: 
-   - DO NOT search for real URLs. 
-   - Instead, generate a dynamic URL using this format: "https://image.pollinations.ai/prompt/{visual_description_of_image}?width=800&height=600&nologo=true"
-   - Replace {visual_description_of_image} with a vivid, simple description encoded for a URL (e.g. "pikachu%20cartoon", "eiffel%20tower%20at%20night").
-   - **Text Prompt**: For image questions, you MUST provide a 'questionText' field (e.g., "What character is this?", "Name this city", "What brand logo is this?").
+2. **Image Sourcing Priority**:
+   - **PRIORITY 1 (Real Images)**: You MUST try to use a valid, stable, public domain **Wikimedia Commons URL** (ending in .jpg or .png) if you are 90% confident it exists.
+   - **PRIORITY 2 (AI Generation)**: ONLY if you cannot find a specific real image (e.g., abstract concepts, very specific scenarios), use the pollinations.ai format: "https://image.pollinations.ai/prompt/{description}?width=800&height=600&nologo=true".
+   - **Text Prompt**: For image questions, you MUST provide a 'questionText' field (e.g., "What movie scene is this?", "Who is this historical figure?").
 
 3. **Ratio**: Unless "(images)" is specified, aim for ~35% 'image' type and ~65% 'text' type mix.
 
 4. **Answers**: 
    - Must be SHORT (1-3 words max).
-   - **Unique**: No repeating answers in the set.
-   - **Abbreviations**: Provide an array of 'acceptedAnswers' for common aliases (e.g. Answer: "United States", Accepted: ["USA", "US", "America"]).
+   - **Unique**: No repeating answers.
+   - **Abbreviations**: Provide 'acceptedAnswers' for common aliases.
 
-5. **No Emojis**: Do not use emoji puzzles.
+5. **No Emojis**: Do not use emoji puzzles unless explicitly asked.
 `;
 
 // Fisher-Yates Shuffle
@@ -51,8 +49,6 @@ export const generateQuestions = async (topic: string, count: number, existingAn
       model: "gemini-2.5-flash",
       contents: `Generate ${safeCount} trivia questions based on these themes: "${topic}".
       
-      Generate a healthy mix of questions from ALL provided themes. Do not group them by topic.
-      
       Existing answers to avoid: ${JSON.stringify(existingAnswers)}.`,
       config: {
         systemInstruction: SYSTEM_INSTRUCTION,
@@ -64,13 +60,12 @@ export const generateQuestions = async (topic: string, count: number, existingAn
             properties: {
               id: { type: Type.STRING },
               type: { type: Type.STRING, enum: ['text', 'image'] },
-              content: { type: Type.STRING, description: "The question text OR the pollinations.ai URL" },
-              questionText: { type: Type.STRING, description: "The question to ask above the image (Required for image type, e.g. 'What movie is this?')" },
-              answer: { type: Type.STRING, description: "The primary correct answer (1-3 words)" },
+              content: { type: Type.STRING, description: "Wikimedia Commons URL (Preferred) or Pollinations AI URL" },
+              questionText: { type: Type.STRING, description: "The question to ask above the image" },
+              answer: { type: Type.STRING, description: "The primary correct answer" },
               acceptedAnswers: { 
                 type: Type.ARRAY, 
                 items: { type: Type.STRING },
-                description: "List of acceptable abbreviations or alternate spellings" 
               },
               category: { type: Type.STRING }
             },
