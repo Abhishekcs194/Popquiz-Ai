@@ -3,6 +3,7 @@ import { GameStatus, Player, Question, GameState, GameSettings } from './types';
 import { DEFAULT_QUESTIONS } from './constants';
 import { generateQuestions } from './services/geminiService';
 import { multiplayer, NetworkMessage } from './services/multiplayer';
+import { playSound } from './services/soundService'; // Add sound service
 import { LandingPage } from './components/LandingPage';
 import { Lobby } from './components/Lobby';
 import { GameRound } from './components/GameRound';
@@ -161,6 +162,7 @@ const App: React.FC = () => {
                 p.id === playerId ? { ...p, score: p.score + 10, hasAnsweredRound: true } : p
             );
             stateChanged = true;
+            playSound.correct();
         }
     }
     else if (action === 'ANSWER_WRONG') {
@@ -360,9 +362,12 @@ const App: React.FC = () => {
 
     // Handle AI
     if (gameState.settings.deckType === 'ai' && gameState.settings.aiTopic) {
+        
+        // 1. BROADCAST 'generating' STATUS IMMEDIATELY
+        const loadingState = updateState({ status: 'generating' as GameStatus });
+        broadcast(loadingState);
+
         try {
-            updateState({ status: 'generating' as GameStatus }); 
-            
             // Initial batch: Win Score / 10 + buffer
             const countNeeded = Math.ceil(gameState.settings.pointsToWin / 10) + 15;
             
@@ -372,6 +377,9 @@ const App: React.FC = () => {
             console.error("AI Gen failed, using default");
         }
     }
+
+    // Start Game sound
+    playSound.start();
 
     const newState = updateState({
         status: 'playing',
@@ -498,6 +506,7 @@ const App: React.FC = () => {
                <div className="text-5xl mb-4">🤖</div>
                <h2 className="text-2xl font-bold">AI is Thinking...</h2>
                <p>Generating questions about "{gameState.settings.aiTopic}"</p>
+               <p className="text-sm opacity-50 mt-2">Creating images and trivia...</p>
            </div>
         )}
 

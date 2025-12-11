@@ -2,6 +2,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import { Question, Player, GameStatus } from '../types';
 import { ProgressBar } from './ProgressBar';
 import { Scoreboard } from './Scoreboard';
+import { playSound } from '../services/soundService';
 
 // --- Utility: Levenshtein Distance for Fuzzy Matching ---
 const levenshtein = (a: string, b: string): number => {
@@ -24,7 +25,7 @@ const levenshtein = (a: string, b: string): number => {
   return matrix[b.length][a.length];
 };
 
-const checkSimilarity = (input: string, target: string): boolean => {
+const checkSingleSimilarity = (input: string, target: string): boolean => {
   const cleanInput = input.trim().toLowerCase().replace(/[^a-z0-9]/g, '');
   const cleanTarget = target.trim().toLowerCase().replace(/[^a-z0-9]/g, '');
   
@@ -35,8 +36,20 @@ const checkSimilarity = (input: string, target: string): boolean => {
   const maxLength = Math.max(cleanInput.length, cleanTarget.length);
   const similarity = (maxLength - dist) / maxLength;
 
-  // 80% match threshold
-  return similarity >= 0.8;
+  // STRICTER THRESHOLD: 95%
+  return similarity >= 0.95;
+};
+
+const checkAnswer = (input: string, question: Question): boolean => {
+    // Check main answer
+    if (checkSingleSimilarity(input, question.answer)) return true;
+    
+    // Check accepted answers (abbreviations)
+    if (question.acceptedAnswers && question.acceptedAnswers.length > 0) {
+        return question.acceptedAnswers.some(alias => checkSingleSimilarity(input, alias));
+    }
+    
+    return false;
 };
 
 interface GameRoundProps {
@@ -72,6 +85,7 @@ export const GameRound: React.FC<GameRoundProps> = ({
         setInputVal('');
         setLocalState('playing');
         setShake(false);
+        playSound.pop();
         setTimeout(() => {
             inputRef.current?.focus();
         }, 100);
@@ -82,11 +96,13 @@ export const GameRound: React.FC<GameRoundProps> = ({
     e.preventDefault();
     if (localState !== 'playing' || showResult || !inputVal.trim()) return;
 
-    if (checkSimilarity(inputVal, question.answer)) {
+    if (checkAnswer(inputVal, question)) {
       setLocalState('success');
+      playSound.correct();
       onAnswer(true);
     } else {
       setShake(true);
+      playSound.wrong();
       setTimeout(() => setShake(false), 500);
       
       // Notify parent of wrong answer (for display)
@@ -137,7 +153,7 @@ export const GameRound: React.FC<GameRoundProps> = ({
                         <img 
                             src={question.content} 
                             alt="Question" 
-                            className="max-h-[300px] w-auto mx-auto rounded-xl shadow-2xl border-4 border-white object-contain bg-white"
+                            className="max-h-[350px] w-auto mx-auto rounded-xl shadow-2xl border-4 border-white object-contain bg-white"
                         />
                     </div>
                 )}
@@ -157,6 +173,11 @@ export const GameRound: React.FC<GameRoundProps> = ({
                     <div className="bg-white text-black px-8 py-6 rounded-2xl shadow-[0_0_50px_rgba(255,255,255,0.3)] text-center border-4 border-yellow-400">
                         <div className="text-4xl md:text-6xl font-black">{question.answer}</div>
                     </div>
+                     {question.acceptedAnswers && (
+                        <div className="mt-4 text-white/60 text-sm font-bold">
+                            Also accepted: {question.acceptedAnswers.join(', ')}
+                        </div>
+                    )}
                 </div>
             )}
 

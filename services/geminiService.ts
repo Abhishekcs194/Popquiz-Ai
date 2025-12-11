@@ -6,12 +6,24 @@ You are a trivia game content generator for a game called "PopQuiz".
 The goal is to generate fast-paced trivia where users TYPE the answer.
 
 RULES:
-1. **Ratio**: Roughly 35% of questions MUST be 'image' type, 65% 'text' type.
-2. **Images**: Use ONLY valid, public Wikimedia Commons URLs (ending in .jpg or .png). If you cannot find a high-confidence image, use text.
-3. **Answers**: Must be SHORT (1-3 words max), easy to spell, or commonly known.
-4. **Uniqueness**: No repeating answers.
+1. **Bracket Logic**: The user input may contain brackets like "Pokemon(images)" or "History(easy)".
+   - If "(images)" is present for a topic, 100% of questions for that topic MUST be 'image' type.
+   - If "(easy)", "(hard)", etc. are present, adjust difficulty accordingly.
+   
+2. **Image Generation**: 
+   - DO NOT search for real URLs. 
+   - Instead, generate a dynamic URL using this format: "https://image.pollinations.ai/prompt/{visual_description_of_image}?width=800&height=600&nologo=true"
+   - Replace {visual_description_of_image} with a vivid, simple description encoded for a URL (e.g. "pikachu%20cartoon", "eiffel%20tower%20at%20night").
+   - Ensure the description allows the player to guess the answer.
+
+3. **Ratio**: Unless "(images)" is specified, aim for ~35% 'image' type and ~65% 'text' type mix.
+
+4. **Answers**: 
+   - Must be SHORT (1-3 words max).
+   - **Unique**: No repeating answers in the set.
+   - **Abbreviations**: Provide an array of 'acceptedAnswers' for common aliases (e.g. Answer: "United States", Accepted: ["USA", "US", "America"]).
+
 5. **No Emojis**: Do not use emoji puzzles.
-6. **No Multiple Choice**: Just the question and the answer.
 `;
 
 // Fisher-Yates Shuffle
@@ -39,9 +51,7 @@ export const generateQuestions = async (topic: string, count: number, existingAn
       model: "gemini-2.5-flash",
       contents: `Generate ${safeCount} trivia questions based on these themes: "${topic}".
       
-      CRITICAL INSTRUCTION: 
-      - Provide approximately ${Math.floor(safeCount * 0.35)} 'image' questions and ${Math.ceil(safeCount * 0.65)} 'text' questions.
-      - If multiple topics are listed, generate questions for ALL of them.
+      Generate a healthy mix of questions from ALL provided themes. Do not group them by topic.
       
       Existing answers to avoid: ${JSON.stringify(existingAnswers)}.`,
       config: {
@@ -54,8 +64,13 @@ export const generateQuestions = async (topic: string, count: number, existingAn
             properties: {
               id: { type: Type.STRING },
               type: { type: Type.STRING, enum: ['text', 'image'] },
-              content: { type: Type.STRING, description: "The question text OR the Wikimedia image URL" },
-              answer: { type: Type.STRING, description: "The correct answer string (1-3 words)" },
+              content: { type: Type.STRING, description: "The question text OR the pollinations.ai URL" },
+              answer: { type: Type.STRING, description: "The primary correct answer (1-3 words)" },
+              acceptedAnswers: { 
+                type: Type.ARRAY, 
+                items: { type: Type.STRING },
+                description: "List of acceptable abbreviations or alternate spellings" 
+              },
               category: { type: Type.STRING }
             },
             required: ['id', 'type', 'content', 'answer']

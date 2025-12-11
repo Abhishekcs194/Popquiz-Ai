@@ -1,8 +1,9 @@
 export interface Question {
   id: string;
-  type: 'image' | 'text'; // Removed 'emoji'
+  type: 'image' | 'text';
   content: string; // URL for image, or text string
   answer: string;
+  acceptedAnswers?: string[]; // Array of valid aliases/abbreviations
   category?: string;
 }
 
