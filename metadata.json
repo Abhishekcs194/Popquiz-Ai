@@ -1,0 +1,5 @@
+{
+  "name": "PopQuiz AI",
+  "description": "A fast-paced trivia game inspired by PopSauce. Guess the answer before time runs out! Features a built-in AI deck generator to create infinite questions on any topic.",
+  "requestFramePermissions": []
+}
