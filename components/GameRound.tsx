@@ -101,16 +101,35 @@ export const GameRound: React.FC<GameRoundProps> = ({
     }
   }, [question.id, gameStatus, question.type]);
 
+  // Safety Timeout: If image takes > 3 seconds, stop spinning so user can play
+  useEffect(() => {
+      let timeout: number;
+      if (isImageLoading) {
+          timeout = window.setTimeout(() => {
+              if (isImageLoading) {
+                  console.warn("Image load timeout - forcing display");
+                  setIsImageLoading(false);
+                  playSound.pop();
+              }
+          }, 3000); // 3 seconds max wait
+      }
+      return () => clearTimeout(timeout);
+  }, [isImageLoading]);
+
   const handleImageLoad = () => {
-      setIsImageLoading(false);
-      playSound.pop();
+      // Only trigger if we are still waiting (prevent race condition with timeout)
+      if (isImageLoading) {
+          setIsImageLoading(false);
+          playSound.pop();
+      }
   };
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     if (localState !== 'playing' || showResult || !inputVal.trim()) return;
-    if (isImageLoading) return; // Prevent answering while loading
-
+    
+    // We allow submitting even if loading (in case user knows the answer from questionText)
+    
     if (checkAnswer(inputVal, question)) {
       setLocalState('success');
       playSound.correct();
@@ -130,8 +149,10 @@ export const GameRound: React.FC<GameRoundProps> = ({
     }
   };
 
-  // Pause the visual timer if image is still loading
-  const isTimerActive = gameStatus === 'playing' && localState === 'playing' && !isImageLoading;
+  // Timer is active if game is playing
+  // We keep timer running even during load to maintain server sync, 
+  // but pre-caching + fast assets should make this delay negligible.
+  const isTimerActive = gameStatus === 'playing' && localState === 'playing';
 
   return (
     <div className="w-full max-w-6xl mx-auto flex flex-col md:flex-row h-full gap-6 pb-6 p-4">
@@ -164,14 +185,14 @@ export const GameRound: React.FC<GameRoundProps> = ({
                 {question.type === 'image' && (
                     <div className="flex flex-col items-center">
                         {/* Display Question Text */}
-                        <div className="text-xl md:text-3xl font-bold mb-6 text-white drop-shadow-md">
+                        <div className="text-xl md:text-3xl font-bold mb-6 text-white drop-shadow-md animate-pop">
                             {question.questionText || "What is this?"}
                         </div>
                         
                         <div className="relative inline-block group mb-4 min-h-[200px] flex items-center justify-center">
                              {/* Loading Spinner */}
                              {isImageLoading && (
-                                <div className="absolute inset-0 flex items-center justify-center">
+                                <div className="absolute inset-0 flex items-center justify-center z-10 bg-black/20 backdrop-blur-sm rounded-xl">
                                     <div className="w-12 h-12 border-4 border-white/30 border-t-yellow-400 rounded-full animate-spin"></div>
                                 </div>
                             )}
@@ -185,6 +206,7 @@ export const GameRound: React.FC<GameRoundProps> = ({
                                 key={question.content} 
                                 src={question.content} 
                                 onLoad={handleImageLoad}
+                                onError={() => setIsImageLoading(false)} // Handle error by showing whatever we have
                                 alt="Question" 
                                 className={`
                                     max-h-[350px] w-auto mx-auto rounded-xl shadow-2xl border-4 border-white object-contain bg-white transition-opacity duration-300
@@ -240,14 +262,14 @@ export const GameRound: React.FC<GameRoundProps> = ({
                     type="text"
                     value={inputVal}
                     onChange={(e) => setInputVal(e.target.value)}
-                    disabled={localState !== 'playing' || showResult || isImageLoading}
+                    disabled={localState !== 'playing' || showResult}
                     className={`
                         w-full px-6 py-5 rounded-2xl text-2xl font-bold text-center outline-none border-4 shadow-2xl transition-all
                         placeholder-white/20
                         ${(localState === 'playing' && !showResult) ? 'bg-white text-indigo-900 border-white focus:border-yellow-400' : ''}
                         ${localState === 'success' ? 'bg-green-100 text-green-800 border-green-500' : ''}
                         ${localState === 'failed' || showResult ? 'bg-gray-700 text-gray-400 border-gray-600' : ''}
-                        ${isImageLoading ? 'opacity-50 cursor-wait' : ''}
+                        ${isImageLoading ? 'opacity-50 cursor-progress' : ''}
                     `}
                     placeholder={showResult ? "Round Over" : isImageLoading ? "Loading Image..." : "Type your answer..."}
                     autoComplete="off"
