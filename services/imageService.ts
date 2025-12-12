@@ -14,7 +14,10 @@ const SPAM_TERMS = [
   'stub', 'disambig', 'wiki_letter', 'chart', 'diagram',
   'store', 'shop', 'center', 'building', 'mall', 'plush', 'toy', 'merch', 'card', 'box',
   'cosplay', 'costume', 'suit', 'human', 'man', 'woman', 'person', 'convention', 'event', 'fan',
-  'advert', 'pdf', 'svg', 'webm', 'ogv'
+  'advert', 'pdf', 'svg', 'webm', 'ogv',
+  // New visual noise filters
+  'graffiti', 'mural', 'street_art', 'sculpture', 'statue', 'lego', 'cake', 'food',
+  'booth', 'stand', 'expo', 'stage', 'screen', 'display', 'monitor'
 ];
 
 const CONTEXT_TERMS = {
@@ -87,7 +90,28 @@ const fetchTmdbImage = async (query: string): Promise<string | null> => {
     } catch (e) { return null; }
 };
 
-// --- 5. FLAGS (RestCountries) ---
+// --- 5. ITUNES (Fallback for Movies & Games) ---
+// Excellent for Official Posters and App Icons (which look like covers)
+const fetchItunesImage = async (query: string, type: 'movie' | 'game'): Promise<string | null> => {
+    try {
+        const entity = type === 'movie' ? 'movie' : 'software';
+        // software searches the App Store. Good for "Minecraft", "Among Us", "PUBG", etc.
+        const res = await fetch(`https://itunes.apple.com/search?term=${encodeURIComponent(query)}&media=${entity}&limit=1`);
+        if (!res.ok) return null;
+        const data = await res.json();
+        
+        if (data.results && data.results.length > 0) {
+            // Get the 100x100 url and upgrade it to 600x600 for high res
+            const smallUrl = data.results[0].artworkUrl100;
+            if (smallUrl) {
+                return smallUrl.replace('100x100', '600x600');
+            }
+        }
+        return null;
+    } catch (e) { return null; }
+}
+
+// --- 6. FLAGS (RestCountries) ---
 const fetchFlagImage = async (query: string): Promise<string | null> => {
     try {
         const cleanQuery = query.replace('flag', '').trim();
@@ -99,7 +123,7 @@ const fetchFlagImage = async (query: string): Promise<string | null> => {
     } catch (e) { return null; }
 };
 
-// --- 6. ART (Met Museum) ---
+// --- 7. ART (Met Museum) ---
 const fetchArtImage = async (query: string): Promise<string | null> => {
     try {
         const searchRes = await fetch(`https://collectionapi.metmuseum.org/public/collection/v1/search?q=${encodeURIComponent(query)}&hasImages=true`);
@@ -115,36 +139,43 @@ const fetchArtImage = async (query: string): Promise<string | null> => {
     } catch (e) { return null; }
 };
 
-// --- 7. WIKI HELPER ---
-// Internal helper to run a specific wiki query
+// --- 8. WIKI HELPER ---
 async function runWikiSearch(query: string, type: string): Promise<string | null> {
   const candidates: string[] = [];
   
   const collectCandidates = (pages: any[]) => {
       for (const page of Object.values(pages)) {
-          const url = page.thumbnail?.source || page.imageinfo?.[0]?.thumburl || page.imageinfo?.[0]?.url;
+          // Prefer 'original' source if available (better quality), then thumbnail
+          const url = page.original?.source || page.thumbnail?.source || page.imageinfo?.[0]?.thumburl || page.imageinfo?.[0]?.url;
           if (url && isValidWikiImage(url, query, type)) {
               candidates.push(url);
           }
       }
   };
 
-  // A. Page Images
+  // A. Page Images (Best for "Official" things like Game Covers that are Fair Use on Wiki)
   try {
       const params = new URLSearchParams({
         action: 'query', generator: 'search', gsrsearch: query, gsrlimit: '3', 
-        prop: 'pageimages', pithumbsize: '600', format: 'json', origin: '*' 
+        prop: 'pageimages', pithumbsize: '600', piprop: 'thumbnail|original', format: 'json', origin: '*' 
       });
       const res = await fetch(`${WIKI_API_URL}?${params.toString()}`);
       const data = await res.json();
       if (data.query?.pages) collectCandidates(data.query.pages);
   } catch(e) {}
 
-  if (candidates.length > 0) return candidates[0]; // Return first best
+  if (candidates.length > 0) return candidates[0]; 
 
   // B. Commons Files (Backup)
+  // WARNING: Commons DOES NOT host copyrighted game covers or movie posters. 
+  // It only hosts fan photos, cosplay, and graffiti.
+  // We SKIP this for games/movies to avoid bad images.
+  if (type === 'game' || type === 'movie') {
+      return null;
+  }
+
   try {
-      const spamFilter = '-cosplay -costume -pdf -webm -text';
+      const spamFilter = '-cosplay -costume -pdf -webm -text -graffiti -sculpture';
       const searchQuery = `${query} ${spamFilter}`; 
       const params = new URLSearchParams({
         action: 'query', generator: 'search', gsrsearch: searchQuery, 
@@ -159,39 +190,49 @@ async function runWikiSearch(query: string, type: string): Promise<string | null
   return candidates.length > 0 ? candidates[Math.floor(Math.random() * candidates.length)] : null;
 }
 
-// --- MASTER ROUTER WITH ITERATIVE FALLBACK ---
+// --- MASTER ROUTER ---
 export const getSmartImage = async (query: string, type?: string, topic?: string): Promise<string | null> => {
     const safeType = type || 'general';
     let imageUrl: string | null = null;
     
-    // 1. Try Specific API (If exact type match)
+    // 1. Specific High-Quality APIs
     if (safeType === 'pokemon') imageUrl = await fetchPokemonImage(query);
     else if (safeType === 'anime') imageUrl = await fetchAnimeImage(query);
     else if (safeType === 'flag') imageUrl = await fetchFlagImage(query);
     else if (safeType === 'art') imageUrl = await fetchArtImage(query);
     
-    // Only use RAWG/TMDB if the type is explicitly game/movie. 
-    // If type is 'character', we skip to Wiki to avoid finding the Game cover instead of the Character.
-    else if (safeType === 'game') imageUrl = await fetchRawgImage(query); 
-    else if (safeType === 'movie') imageUrl = await fetchTmdbImage(query);
+    // Game/Movie Strategy:
+    // 1. Private Key APIs (Best)
+    // 2. iTunes API (Great for Posters/Icons, No Key)
+    // 3. Wiki Page Images (Good for Covers)
+    // 4. SKIP Commons (Avoids Graffiti/Cosplay)
+    else if (safeType === 'game') {
+        imageUrl = await fetchRawgImage(query);
+        if (!imageUrl) imageUrl = await fetchItunesImage(query, 'game');
+    }
+    else if (safeType === 'movie') {
+        imageUrl = await fetchTmdbImage(query);
+        if (!imageUrl) imageUrl = await fetchItunesImage(query, 'movie');
+    }
 
     if (imageUrl) return imageUrl;
 
     // 2. Iterative Wiki Fallback Strategy
-    // Strategy A: Subject + Topic (e.g. "Iron Fist Alexander Elden Ring") - Most Specific
+    
+    // Strategy A: Subject + Topic
     if (topic && !query.toLowerCase().includes(topic.toLowerCase())) {
         imageUrl = await runWikiSearch(`${query} ${topic}`, safeType);
         if (imageUrl) return imageUrl;
     }
 
-    // Strategy B: Subject + Type (e.g. "Iron Fist Alexander Video Game" or "Character")
+    // Strategy B: Subject + Type
     const categorySuffix = safeType === 'character' ? 'character' : safeType === 'game' ? 'video game' : safeType;
     if (categorySuffix && categorySuffix !== 'general') {
         imageUrl = await runWikiSearch(`${query} ${categorySuffix}`, safeType);
         if (imageUrl) return imageUrl;
     }
 
-    // Strategy C: Subject Only (e.g. "Iron Fist Alexander") - Broadest
+    // Strategy C: Subject Only
     imageUrl = await runWikiSearch(query, safeType);
     
     return imageUrl;
