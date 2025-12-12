@@ -11,14 +11,12 @@ RULES:
    - If "(images)" is present, 100% of questions MUST be 'image' type.
    
 2. **Image Sourcing Strategy**:
-   - For 'image' type questions, providing the **Correct Wikipedia Page Title** is critical.
-   - **Pop Culture**: For characters, movies, or games, use the specific page title.
-     - Use "Iron Man (character)" instead of "Iron Man".
-     - Use "Avatar (2009 film)" instead of "Avatar".
-     - Use "Vaporeon" (Unique enough).
-   - **Brands**: Use the company name (e.g. "Coca-Cola").
-   - **General**: Use the specific object name (e.g. "Eiffel Tower").
-   - The system will use this title to fetch the official Wikipedia Infobox image.
+   - For 'image' type questions, provide a **Searchable Subject Name** in the 'content' field.
+   - **Pop Culture**: "Iron Man (character)", "Avatar (2009 film)", "Pikachu".
+   - **Brands**: "Coca-Cola logo", "Nike logo".
+   - **General**: "Eiffel Tower", "Lion", "DNA double helix".
+   - The system will search Wikipedia/Commons to find the best image.
+   - **Do NOT** use URLs.
 
 3. **Ratio**: Unless "(images)" is specified, aim for ~35% 'image' type and ~65% 'text' type mix.
 
@@ -26,7 +24,7 @@ RULES:
    - Must be SHORT (1-3 words max).
    - **Unique**: No repeating answers.
    - **Abbreviations**: Provide 'acceptedAnswers' for common aliases.
-   - For image questions, ensure the 'answer' matches the image you expect to be found.
+   - For image questions, ensure the 'answer' matches the image likely to be found for your search term.
 
 5. **Question Text**:
    - For image questions, ALWAYS provide 'questionText' (e.g. "Name this character", "What movie is this?", "Whose logo is this?").
@@ -70,7 +68,7 @@ export const generateQuestions = async (topic: string, count: number, existingAn
             properties: {
               id: { type: Type.STRING },
               type: { type: Type.STRING, enum: ['text', 'image'] },
-              content: { type: Type.STRING, description: "Precise Wikipedia Page Title (e.g. 'Mario (character)')" },
+              content: { type: Type.STRING, description: "Search term for the image (e.g. 'Pikachu')" },
               questionText: { type: Type.STRING, description: "The question to ask above the image" },
               answer: { type: Type.STRING, description: "The primary correct answer" },
               acceptedAnswers: { 
@@ -99,7 +97,7 @@ export const generateQuestions = async (topic: string, count: number, existingAn
                 // Success: We found a real, valid Wikimedia thumbnail
                 return { ...q, content: realUrl };
             } else {
-                // Fallback: AI Generation
+                // Fallback: AI Generation (Last Resort)
                 console.log(`[GeminiService] Wiki lookup failed for '${q.content}', using AI fallback.`);
                 const prompt = q.questionText || q.answer;
                 const aiUrl = `https://image.pollinations.ai/prompt/${encodeURIComponent(prompt)}?width=400&height=400&nologo=true&seed=${Math.random()}`;
