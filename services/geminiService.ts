@@ -1,5 +1,6 @@
 import { GoogleGenAI, Type } from "@google/genai";
 import { Question } from "../types";
+import { getWikimediaImage } from "./wikiService";
 
 const SYSTEM_INSTRUCTION = `
 You are a trivia game content generator for a game called "PopQuiz".
@@ -9,14 +10,14 @@ RULES:
 1. **Bracket Logic**: The user input may contain brackets like "Pokemon(images)" or "History(easy)".
    - If "(images)" is present, 100% of questions MUST be 'image' type.
    
-2. **Image Sourcing Priority**:
-   - **PRIORITY 1 (Real Images)**: Use a **Wikimedia Commons URL** (https://upload.wikimedia.org/wikipedia/commons/...) ONLY if you are 100% CERTAIN of the exact path.
-   - **FORBIDDEN**: Do NOT use 'wikipedia/en/' URLs (e.g. Fair Use images). These often block hotlinking. Use ONLY 'wikipedia/commons/'.
-   - **WARNING**: Do not guess MD5 hashes for pop culture characters (Pokemon, Anime) unless they are extremely famous and stable.
-   
-   - **PRIORITY 2 (AI Generation)**: If you cannot find a STABLE Commons URL, use the pollinations.ai format: "https://image.pollinations.ai/prompt/{description}?width=400&height=400&nologo=true".
-   - **NOTE**: The AI image URL width is set to 400 for speed.
-   - **Text Prompt**: For image questions, you MUST provide a 'questionText' field (e.g., "What movie scene is this?", "Who is this historical figure?", "What logo is this?").
+2. **Image Sourcing Strategy (CRITICAL)**:
+   - For 'image' type questions, you must provide a **Search Keyword** in the 'content' field.
+   - Do NOT try to guess a full URL. Do NOT use "https://...".
+   - **Example**: 
+     - Correct Content: "Super Mario Bros NES gameplay"
+     - Correct Content: "Eiffel Tower Paris"
+     - Correct Content: "Elon Musk portrait"
+   - The system will use your search keyword to find a real, working image from Wikimedia.
 
 3. **Ratio**: Unless "(images)" is specified, aim for ~35% 'image' type and ~65% 'text' type mix.
 
@@ -24,8 +25,12 @@ RULES:
    - Must be SHORT (1-3 words max).
    - **Unique**: No repeating answers.
    - **Abbreviations**: Provide 'acceptedAnswers' for common aliases.
+   - For image questions, ensure the 'answer' matches the image you expect to be found.
 
-5. **No Emojis**: Do not use emoji puzzles unless explicitly asked.
+5. **Question Text**:
+   - For image questions, ALWAYS provide 'questionText' (e.g. "What game is this?", "Name this character").
+
+6. **No Emojis**: Do not use emoji puzzles unless explicitly asked.
 `;
 
 // Fisher-Yates Shuffle
@@ -64,7 +69,7 @@ export const generateQuestions = async (topic: string, count: number, existingAn
             properties: {
               id: { type: Type.STRING },
               type: { type: Type.STRING, enum: ['text', 'image'] },
-              content: { type: Type.STRING, description: "Wikimedia Commons URL (Preferred) or Pollinations AI URL" },
+              content: { type: Type.STRING, description: "Search keyword for the image (e.g. 'Pikachu')" },
               questionText: { type: Type.STRING, description: "The question to ask above the image" },
               answer: { type: Type.STRING, description: "The primary correct answer" },
               acceptedAnswers: { 
@@ -84,9 +89,31 @@ export const generateQuestions = async (topic: string, count: number, existingAn
 
     let questions = JSON.parse(text) as Question[];
     
-    // Assign IDs and Shuffle strictly to mix topics
-    questions = questions.map((q, i) => ({ ...q, id: `${Date.now()}-${i}` }));
-    return shuffleArray(questions);
+    // --- POST-PROCESSING: Resolve Images ---
+    // We now have questions where content="Pikachu". We need to find the URL.
+    const resolvedQuestions = await Promise.all(questions.map(async (q) => {
+        if (q.type === 'image') {
+            // q.content is currently a search term like "Pikachu"
+            const realUrl = await getWikimediaImage(q.content);
+            
+            if (realUrl) {
+                // Success: We found a real, valid Wikimedia thumbnail
+                return { ...q, content: realUrl };
+            } else {
+                // Fallback: If Wikipedia search fails, generate an AI image
+                // We construct the Pollinations URL here so the frontend gets a valid URL
+                console.log(`[GeminiService] Wiki lookup failed for '${q.content}', using AI fallback.`);
+                const prompt = q.questionText || q.answer;
+                const aiUrl = `https://image.pollinations.ai/prompt/${encodeURIComponent(prompt)}?width=400&height=400&nologo=true&seed=${Math.random()}`;
+                return { ...q, content: aiUrl };
+            }
+        }
+        return q;
+    }));
+
+    // Assign IDs and Shuffle
+    const finalQuestions = resolvedQuestions.map((q, i) => ({ ...q, id: `${Date.now()}-${i}` }));
+    return shuffleArray(finalQuestions);
 
   } catch (error) {
     console.error("Failed to generate questions:", error);
