@@ -69,24 +69,24 @@ export const GameOver: React.FC<GameOverProps> = ({ players, onRestart, onHome, 
     <div className="relative w-full max-w-4xl mx-auto flex flex-col items-center justify-center p-4">
       <canvas ref={canvasRef} className="fixed inset-0 pointer-events-none z-0" />
       
-      <div className="relative z-10 w-full bg-white/10 backdrop-blur-xl rounded-3xl shadow-2xl border border-white/20 p-8 md:p-12 animate-pop text-center">
+      <div className="relative z-10 w-full bg-white/10 backdrop-blur-xl rounded-3xl shadow-2xl border border-white/20 p-6 md:p-12 animate-pop text-center">
         
-        <div className="mb-8">
-            <div className="text-8xl mb-4 animate-bounce">🏆</div>
-            <h2 className="text-4xl md:text-6xl font-black text-white mb-2 uppercase tracking-widest drop-shadow-xl">
+        <div className="mb-6 md:mb-8">
+            <div className="text-6xl md:text-8xl mb-4 animate-bounce">🏆</div>
+            <h2 className="text-3xl md:text-6xl font-black text-white mb-2 uppercase tracking-widest drop-shadow-xl">
                 WINNER!
             </h2>
-            <div className="text-2xl md:text-4xl font-bold text-yellow-300 mb-2">{winner?.name}</div>
-            <div className="text-white/60 font-bold uppercase tracking-widest">Score: {winner?.score}</div>
+            <div className="text-xl md:text-4xl font-bold text-yellow-300 mb-2">{winner?.name}</div>
+            <div className="text-white/60 font-bold uppercase tracking-widest text-sm md:text-base">Score: {winner?.score}</div>
         </div>
 
-        <div className="grid md:grid-cols-2 gap-8 mb-8 text-left">
+        <div className="grid md:grid-cols-2 gap-6 md:gap-8 mb-8 text-left">
             <div>
-                 <h3 className="text-sm font-bold uppercase tracking-widest text-white/50 mb-4 text-center">Final Standings</h3>
+                 <h3 className="text-xs md:text-sm font-bold uppercase tracking-widest text-white/50 mb-4 text-center">Final Standings</h3>
                  <Scoreboard players={players} compact />
             </div>
             
-            <div className="flex flex-col justify-center space-y-4">
+            <div className="flex flex-col justify-center space-y-3 md:space-y-4">
                 {isHost && (
                     <Button onClick={onRestart} fullWidth variant="success" size="lg" className="animate-pulse shadow-xl">
                         Return to Lobby

@@ -148,16 +148,16 @@ export const GameRound: React.FC<GameRoundProps> = ({
   const isTimerActive = gameStatus === 'playing' && localState === 'playing';
 
   return (
-    <div className="w-full max-w-6xl mx-auto flex flex-col md:flex-row h-full gap-6 pb-6 p-4">
+    <div className="w-full max-w-6xl mx-auto flex flex-col md:flex-row h-full gap-4 md:gap-6 pb-4 md:pb-6 p-2 md:p-4">
       
       {/* Main Game Area */}
-      <div className="flex-1 flex flex-col">
+      <div className="flex-1 flex flex-col min-h-0">
         {/* Header */}
         <div className="flex justify-between items-center mb-2">
-            <div className="bg-black/30 px-4 py-2 rounded-full font-bold text-lg border border-white/10">
+            <div className="bg-black/30 px-3 py-1 md:px-4 md:py-2 rounded-full font-bold text-sm md:text-lg border border-white/10">
              Question #{questionIndex + 1}
             </div>
-            <div className="text-sm font-bold opacity-60 uppercase tracking-widest">
+            <div className="text-xs md:text-sm font-bold opacity-60 uppercase tracking-widest">
                 {question.category || 'General'}
             </div>
         </div>
@@ -171,22 +171,22 @@ export const GameRound: React.FC<GameRoundProps> = ({
         />
 
         {/* Question Content */}
-        <div className="flex-1 flex flex-col items-center justify-center min-h-[250px] mb-4 relative bg-black/10 rounded-3xl border border-white/5 p-4 overflow-hidden shadow-inner">
+        <div className="flex-1 flex flex-col items-center justify-center min-h-[200px] md:min-h-[250px] mb-4 relative bg-black/10 rounded-3xl border border-white/5 p-2 md:p-4 overflow-hidden shadow-inner">
             
             {/* The Question */}
             <div className={`animate-pop w-full max-w-2xl text-center transition-all duration-500 ${showResult ? 'blur-sm scale-95 opacity-50' : ''}`}>
                 {question.type === 'image' && (
                     <div className="flex flex-col items-center">
                         {/* Display Question Text */}
-                        <div className="text-xl md:text-3xl font-bold mb-6 text-white drop-shadow-md animate-pop">
+                        <div className="text-lg md:text-3xl font-bold mb-2 md:mb-6 text-white drop-shadow-md animate-pop">
                             {question.questionText || "What is this?"}
                         </div>
                         
-                        <div className="relative inline-block group mb-4 min-h-[200px] flex items-center justify-center">
+                        <div className="relative inline-block group mb-2 md:mb-4 min-h-[150px] md:min-h-[200px] flex items-center justify-center w-full">
                              {/* Loading Spinner */}
                              {isImageLoading && !imageError && (
                                 <div className="absolute inset-0 flex items-center justify-center z-10 bg-black/20 backdrop-blur-sm rounded-xl">
-                                    <div className="w-12 h-12 border-4 border-white/30 border-t-yellow-400 rounded-full animate-spin"></div>
+                                    <div className="w-10 h-10 md:w-12 md:h-12 border-4 border-white/30 border-t-yellow-400 rounded-full animate-spin"></div>
                                 </div>
                             )}
                             
@@ -200,7 +200,7 @@ export const GameRound: React.FC<GameRoundProps> = ({
                                 loading="eager"
                                 crossOrigin="anonymous"
                                 className={`
-                                    max-h-[350px] w-auto mx-auto rounded-xl shadow-2xl border-4 border-white object-contain bg-white transition-opacity duration-300
+                                    max-h-[220px] md:max-h-[350px] w-auto mx-auto rounded-xl shadow-2xl border-4 border-white object-contain bg-white transition-opacity duration-300
                                     ${isImageLoading ? 'opacity-0' : 'opacity-100'}
                                     ${imageError ? 'grayscale opacity-50' : ''}
                                 `}
@@ -210,7 +210,7 @@ export const GameRound: React.FC<GameRoundProps> = ({
                 )}
                 {/* Fallback for text */}
                 {question.type === 'text' && (
-                    <div className="text-3xl md:text-5xl font-black leading-tight drop-shadow-lg px-4 mb-8">
+                    <div className="text-2xl md:text-5xl font-black leading-tight drop-shadow-lg px-4 mb-4 md:mb-8">
                         {question.content}
                     </div>
                 )}
@@ -219,13 +219,13 @@ export const GameRound: React.FC<GameRoundProps> = ({
             {/* Status Messages / Round Result Overlay */}
             
             {showResult && (
-                 <div className="absolute inset-0 z-20 flex flex-col items-center justify-center bg-black/60 backdrop-blur-sm animate-pop">
-                    <div className="text-xl uppercase tracking-widest font-bold text-white/60 mb-2">The Answer Was</div>
-                    <div className="bg-white text-black px-8 py-6 rounded-2xl shadow-[0_0_50px_rgba(255,255,255,0.3)] text-center border-4 border-yellow-400">
-                        <div className="text-4xl md:text-6xl font-black">{question.answer}</div>
+                 <div className="absolute inset-0 z-20 flex flex-col items-center justify-center bg-black/60 backdrop-blur-sm animate-pop p-4">
+                    <div className="text-sm md:text-xl uppercase tracking-widest font-bold text-white/60 mb-2">The Answer Was</div>
+                    <div className="bg-white text-black px-6 py-4 md:px-8 md:py-6 rounded-2xl shadow-[0_0_50px_rgba(255,255,255,0.3)] text-center border-4 border-yellow-400 max-w-full">
+                        <div className="text-2xl md:text-6xl font-black break-words">{question.answer}</div>
                     </div>
                      {question.acceptedAnswers && (
-                        <div className="mt-4 text-white/60 text-sm font-bold">
+                        <div className="mt-4 text-white/60 text-xs md:text-sm font-bold text-center">
                             Also accepted: {question.acceptedAnswers.join(', ')}
                         </div>
                     )}
@@ -233,15 +233,15 @@ export const GameRound: React.FC<GameRoundProps> = ({
             )}
 
             {!showResult && localState === 'success' && (
-                <div className="animate-pop mt-4 bg-green-500/90 text-white px-8 py-4 rounded-xl shadow-2xl border-2 border-green-400 absolute bottom-10 z-10">
-                    <div className="text-4xl font-black">CORRECT!</div>
-                    <div className="text-sm font-bold text-center mt-1 opacity-80">Waiting for others...</div>
+                <div className="animate-pop mt-2 md:mt-4 bg-green-500/90 text-white px-6 py-3 md:px-8 md:py-4 rounded-xl shadow-2xl border-2 border-green-400 absolute bottom-5 md:bottom-10 z-10">
+                    <div className="text-2xl md:text-4xl font-black">CORRECT!</div>
+                    <div className="text-xs md:text-sm font-bold text-center mt-1 opacity-80">Waiting for others...</div>
                 </div>
             )}
             
             {!showResult && localState === 'failed' && (
-                <div className="animate-pop mt-4 bg-red-500/90 text-white px-8 py-4 rounded-xl shadow-2xl border-2 border-red-400 absolute bottom-10 z-10">
-                    <div className="text-4xl font-black">TIME UP!</div>
+                <div className="animate-pop mt-2 md:mt-4 bg-red-500/90 text-white px-6 py-3 md:px-8 md:py-4 rounded-xl shadow-2xl border-2 border-red-400 absolute bottom-5 md:bottom-10 z-10">
+                    <div className="text-2xl md:text-4xl font-black">TIME UP!</div>
                 </div>
             )}
         </div>
@@ -256,7 +256,7 @@ export const GameRound: React.FC<GameRoundProps> = ({
                     onChange={(e) => setInputVal(e.target.value)}
                     disabled={localState !== 'playing' || showResult}
                     className={`
-                        w-full px-6 py-5 rounded-2xl text-2xl font-bold text-center outline-none border-4 shadow-2xl transition-all
+                        w-full px-4 py-3 md:px-6 md:py-5 rounded-2xl text-xl md:text-2xl font-bold text-center outline-none border-4 shadow-2xl transition-all
                         placeholder-white/20
                         ${(localState === 'playing' && !showResult) ? 'bg-white text-indigo-900 border-white focus:border-yellow-400' : ''}
                         ${localState === 'success' ? 'bg-green-100 text-green-800 border-green-500' : ''}
@@ -268,14 +268,14 @@ export const GameRound: React.FC<GameRoundProps> = ({
                     autoFocus
                 />
             </form>
-            <div className="text-center mt-3 text-white/40 text-sm font-medium">
+            <div className="text-center mt-2 md:mt-3 text-white/40 text-xs md:text-sm font-medium">
                 10 Points per correct answer
             </div>
         </div>
       </div>
 
       {/* Scoreboard Sidebar */}
-      <div className="w-full md:w-80 flex-shrink-0">
+      <div className="w-full md:w-80 flex-shrink-0 order-last md:order-none">
         <Scoreboard players={players} />
       </div>
 

@@ -14,7 +14,6 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onCreate, onJoin, init
   const [roomCode, setRoomCode] = useState(initialCode);
   const [mode, setMode] = useState<'menu' | 'join'>('menu');
 
-  // If a code is provided via props (e.g. from URL), switch to join mode immediately
   useEffect(() => {
     if (initialCode) {
         setRoomCode(initialCode);
@@ -33,23 +32,23 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onCreate, onJoin, init
   };
 
   return (
-    <div className="max-w-md w-full mx-auto bg-white/10 backdrop-blur-md rounded-3xl shadow-2xl border border-white/20 p-8 animate-pop">
-      <h1 className="text-5xl font-black text-center mb-2 tracking-wider text-yellow-300 drop-shadow-[0_4px_0_rgba(0,0,0,0.5)]">
+    <div className="max-w-md w-full mx-auto bg-white/10 backdrop-blur-md rounded-3xl shadow-2xl border border-white/20 p-6 md:p-8 animate-pop">
+      <h1 className="text-4xl md:text-5xl font-black text-center mb-2 tracking-wider text-yellow-300 drop-shadow-[0_4px_0_rgba(0,0,0,0.5)]">
         POPQUIZ
       </h1>
-      <p className="text-center text-white/60 mb-8 font-bold tracking-widest uppercase text-sm">
+      <p className="text-center text-white/60 mb-6 md:mb-8 font-bold tracking-widest uppercase text-xs md:text-sm">
         Multiplayer Trivia
       </p>
 
       {/* Profile Setup */}
-      <div className="mb-8 space-y-4">
+      <div className="mb-6 md:mb-8 space-y-4">
         <div>
           <label className="block text-xs font-bold mb-2 uppercase tracking-wide opacity-80">Your Name</label>
           <input
             type="text"
             value={name}
             onChange={(e) => setName(e.target.value)}
-            className="w-full px-4 py-3 bg-black/20 border-2 border-white/10 rounded-xl focus:border-yellow-400 focus:outline-none text-xl font-bold placeholder-white/30 text-center"
+            className="w-full px-4 py-3 bg-black/20 border-2 border-white/10 rounded-xl focus:border-yellow-400 focus:outline-none text-lg md:text-xl font-bold placeholder-white/30 text-center"
             placeholder="Enter nickname"
             maxLength={12}
           />
@@ -57,7 +56,7 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onCreate, onJoin, init
 
         <div>
           <label className="block text-xs font-bold mb-2 uppercase tracking-wide opacity-80 text-center">Select Avatar</label>
-          <div className="flex justify-center gap-2 overflow-x-auto pb-2 scrollbar-hide">
+          <div className="flex justify-center flex-wrap gap-2 pb-2">
             {AVATARS.map((av) => (
               <button
                 key={av}
@@ -73,7 +72,7 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onCreate, onJoin, init
 
       {/* Actions */}
       {mode === 'menu' ? (
-        <div className="space-y-4">
+        <div className="space-y-3 md:space-y-4">
           <Button fullWidth size="lg" onClick={handleCreate} disabled={!name.trim()}>
             Create Game
           </Button>
@@ -82,7 +81,7 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onCreate, onJoin, init
           </Button>
         </div>
       ) : (
-        <div className="space-y-4 animate-pop">
+        <div className="space-y-3 md:space-y-4 animate-pop">
            <div>
             <label className="block text-xs font-bold mb-2 uppercase tracking-wide opacity-80">Room Code</label>
             <input

@@ -35,16 +35,16 @@ export const Lobby: React.FC<LobbyProps> = ({
   const canStart = isHost && allReady && players.length > 0;
 
   return (
-    <div className="max-w-5xl w-full mx-auto grid md:grid-cols-2 gap-8 animate-pop p-4">
+    <div className="max-w-5xl w-full mx-auto grid md:grid-cols-2 gap-4 md:gap-8 animate-pop p-2 md:p-4">
       
       {/* LEFT: Game Settings (Host Controls) */}
-      <div className="bg-white/10 backdrop-blur-md rounded-3xl shadow-2xl border border-white/20 p-6 flex flex-col">
-        <div className="flex items-center justify-between mb-6">
-            <h2 className="text-2xl font-black uppercase tracking-wide">Game Setup</h2>
+      <div className="bg-white/10 backdrop-blur-md rounded-3xl shadow-2xl border border-white/20 p-5 md:p-6 flex flex-col order-2 md:order-1">
+        <div className="flex items-center justify-between mb-4 md:mb-6">
+            <h2 className="text-xl md:text-2xl font-black uppercase tracking-wide">Game Setup</h2>
             {!isHost && <span className="bg-blue-500 text-xs font-bold px-2 py-1 rounded">GUEST VIEW</span>}
         </div>
 
-        <div className="space-y-6 flex-1">
+        <div className="space-y-4 md:space-y-6 flex-1">
             {/* Deck Selection */}
             <div>
                 <label className="block text-xs font-bold mb-2 uppercase tracking-wide opacity-60">Deck Source</label>
@@ -73,7 +73,7 @@ export const Lobby: React.FC<LobbyProps> = ({
                         value={settings.aiTopic}
                         onChange={(e) => isHost && onUpdateSettings({...settings, aiTopic: e.target.value})}
                         disabled={!isHost}
-                        className="w-full px-4 py-3 bg-black/20 border-2 border-purple-400/30 rounded-xl focus:border-purple-400 focus:outline-none font-bold placeholder-white/20 resize-none h-24"
+                        className="w-full px-4 py-3 bg-black/20 border-2 border-purple-400/30 rounded-xl focus:border-purple-400 focus:outline-none font-bold placeholder-white/20 resize-none h-20 md:h-24 text-sm md:text-base"
                         placeholder="e.g. 80s Movies, Pizza, Science..."
                     />
                 </div>
@@ -91,7 +91,7 @@ export const Lobby: React.FC<LobbyProps> = ({
                             disabled={!isHost}
                             className="flex-1 accent-yellow-400 h-2 bg-black/30 rounded-lg appearance-none cursor-pointer"
                         />
-                        <span className="font-mono font-bold text-xl w-8">{settings.roundDuration}</span>
+                        <span className="font-mono font-bold text-lg md:text-xl w-8">{settings.roundDuration}</span>
                     </div>
                 </div>
                 <div>
@@ -104,13 +104,13 @@ export const Lobby: React.FC<LobbyProps> = ({
                             disabled={!isHost}
                             className="flex-1 accent-yellow-400 h-2 bg-black/30 rounded-lg appearance-none cursor-pointer"
                         />
-                        <span className="font-mono font-bold text-xl w-8">{settings.pointsToWin}</span>
+                        <span className="font-mono font-bold text-lg md:text-xl w-8">{settings.pointsToWin}</span>
                     </div>
                 </div>
             </div>
         </div>
 
-        <div className="mt-8 pt-6 border-t border-white/10">
+        <div className="mt-6 md:mt-8 pt-4 md:pt-6 border-t border-white/10">
             {isHost ? (
                 <div className="space-y-3">
                      <Button 
@@ -147,18 +147,18 @@ export const Lobby: React.FC<LobbyProps> = ({
       </div>
 
       {/* RIGHT: Player List */}
-      <div className="bg-black/20 backdrop-blur-md rounded-3xl shadow-xl border border-white/10 p-6 flex flex-col">
-        <div className="flex items-center justify-between mb-6">
+      <div className="bg-black/20 backdrop-blur-md rounded-3xl shadow-xl border border-white/10 p-5 md:p-6 flex flex-col order-1 md:order-2">
+        <div className="flex items-center justify-between mb-4 md:mb-6">
             <div>
                 <div className="text-xs uppercase tracking-widest text-white/50">Room Code</div>
-                <div className="text-4xl font-black text-white tracking-widest">{roomId}</div>
+                <div className="text-3xl md:text-4xl font-black text-white tracking-widest">{roomId}</div>
             </div>
             <Button size="sm" variant="outline" onClick={handleShare}>
                 {copied ? "Copied!" : "Share Link"}
             </Button>
         </div>
 
-        <div className="flex-1 overflow-y-auto pr-2 custom-scrollbar">
+        <div className="flex-1 overflow-y-auto pr-2 custom-scrollbar max-h-[300px] md:max-h-none">
             <div className="text-xs uppercase tracking-widest text-white/50 mb-3">Players ({players.length})</div>
             <div className="space-y-3">
                 {players.map(p => (
