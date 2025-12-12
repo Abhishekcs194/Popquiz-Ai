@@ -10,10 +10,12 @@ RULES:
    - If "(images)" is present, 100% of questions MUST be 'image' type.
    
 2. **Image Sourcing Priority**:
-   - **PRIORITY 1 (Real Images)**: You MUST try to use a valid, stable, public domain **Wikimedia Commons URL** (ending in .jpg, .png) if you are 90% confident it exists.
-   - **IMPORTANT**: Choose the "Thumb" version of the URL if possible (e.g., contains '/thumb/'), or a file that is likely small.
-   - **PRIORITY 2 (AI Generation)**: ONLY as a last resort (if no real image is found), use the pollinations.ai format: "https://image.pollinations.ai/prompt/{description}?width=400&height=400&nologo=true". 
-   - **NOTE**: The AI image URL width is set to 400 for speed. Do not increase it.
+   - **PRIORITY 1 (Real Images)**: Use a **Wikimedia Commons URL** (https://upload.wikimedia.org/wikipedia/commons/...) ONLY if you are 100% CERTAIN of the exact path.
+   - **FORBIDDEN**: Do NOT use 'wikipedia/en/' URLs (e.g. Fair Use images). These often block hotlinking. Use ONLY 'wikipedia/commons/'.
+   - **WARNING**: Do not guess MD5 hashes for pop culture characters (Pokemon, Anime) unless they are extremely famous and stable.
+   
+   - **PRIORITY 2 (AI Generation)**: If you cannot find a STABLE Commons URL, use the pollinations.ai format: "https://image.pollinations.ai/prompt/{description}?width=400&height=400&nologo=true".
+   - **NOTE**: The AI image URL width is set to 400 for speed.
    - **Text Prompt**: For image questions, you MUST provide a 'questionText' field (e.g., "What movie scene is this?", "Who is this historical figure?", "What logo is this?").
 
 3. **Ratio**: Unless "(images)" is specified, aim for ~35% 'image' type and ~65% 'text' type mix.

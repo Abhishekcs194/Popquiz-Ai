@@ -77,6 +77,9 @@ export const GameRound: React.FC<GameRoundProps> = ({
   const [shake, setShake] = useState(false);
   const [isImageLoading, setIsImageLoading] = useState(false);
   
+  // Self-Healing Image State
+  const [currentImageSrc, setCurrentImageSrc] = useState(question.content);
+  
   const inputRef = useRef<HTMLInputElement>(null);
   const showResult = gameStatus === 'round_result';
 
@@ -86,6 +89,7 @@ export const GameRound: React.FC<GameRoundProps> = ({
         setInputVal('');
         setLocalState('playing');
         setShake(false);
+        setCurrentImageSrc(question.content); // Reset image source
         
         // Reset image loading state based on type
         if (question.type === 'image') {
@@ -99,7 +103,7 @@ export const GameRound: React.FC<GameRoundProps> = ({
             inputRef.current?.focus();
         }, 100);
     }
-  }, [question.id, gameStatus, question.type]);
+  }, [question.id, gameStatus, question.type, question.content]);
 
   // Safety Timeout: If image takes > 3 seconds, stop spinning so user can play
   useEffect(() => {
@@ -121,6 +125,29 @@ export const GameRound: React.FC<GameRoundProps> = ({
       if (isImageLoading) {
           setIsImageLoading(false);
           playSound.pop();
+      }
+  };
+
+  const handleImageError = () => {
+      // SELF-HEALING LOGIC:
+      // If the stock image fails (404/403), fallback to AI generation immediately.
+      
+      if (!currentImageSrc.includes('pollinations.ai')) {
+          console.log(`[Image Error] Stock image failed: ${currentImageSrc}`);
+          console.log(`[Image Error] Switching to AI fallback for: ${question.answer}`);
+          
+          const prompt = question.questionText 
+            ? `${question.questionText} ${question.answer}` 
+            : question.answer;
+            
+          // Use a different, reliable source
+          const fallbackUrl = `https://image.pollinations.ai/prompt/${encodeURIComponent(prompt)}?width=400&height=400&nologo=true&seed=${Math.random()}`;
+          setCurrentImageSrc(fallbackUrl);
+          // Keep isImageLoading = true, let the new image trigger onLoad
+      } else {
+          // If even the AI image fails, give up and show the broken state (or text)
+          console.error("AI Fallback image also failed");
+          setIsImageLoading(false);
       }
   };
 
@@ -149,9 +176,6 @@ export const GameRound: React.FC<GameRoundProps> = ({
     }
   };
 
-  // Timer is active if game is playing
-  // We keep timer running even during load to maintain server sync, 
-  // but pre-caching + fast assets should make this delay negligible.
   const isTimerActive = gameStatus === 'playing' && localState === 'playing';
 
   return (
@@ -198,15 +222,14 @@ export const GameRound: React.FC<GameRoundProps> = ({
                             )}
                             
                             {/* 
-                                KEY PROP IS CRITICAL HERE:
-                                key={question.content} forces React to unmount the old img and mount a new one.
-                                This prevents the "previous image showing" ghosting effect.
+                                We use currentImageSrc state instead of question.content directly.
+                                This allows us to swap the URL if it errors out.
                             */}
                             <img 
-                                key={question.content} 
-                                src={question.content} 
+                                key={currentImageSrc} 
+                                src={currentImageSrc} 
                                 onLoad={handleImageLoad}
-                                onError={() => setIsImageLoading(false)} // Handle error by showing whatever we have
+                                onError={handleImageError} 
                                 alt="Question" 
                                 className={`
                                     max-h-[350px] w-auto mx-auto rounded-xl shadow-2xl border-4 border-white object-contain bg-white transition-opacity duration-300
