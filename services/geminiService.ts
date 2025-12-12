@@ -84,7 +84,7 @@ export const generateQuestions = async (topic: string, count: number, existingAn
     let questions = JSON.parse(text) as Question[];
     
     // --- Post-Processing: Fetch Images using Smart Router ---
-    const resolvedQuestions = await Promise.all(questions.map(async (q) => {
+    const resolvedQuestions = await Promise.all(questions.map(async (q): Promise<Question> => {
         if (q.type === 'image') {
             // Use the new Smart Router
             const realUrl = await getSmartImage(q.content, q.imageType);
@@ -92,11 +92,17 @@ export const generateQuestions = async (topic: string, count: number, existingAn
             if (realUrl) {
                 return { ...q, content: realUrl };
             } else {
-                // LAST RESORT: AI Generation
-                console.log(`[GeminiService] All APIs failed for '${q.content}' (${q.imageType}), using AI fallback.`);
-                const prompt = `${q.content} ${q.imageType || ''} illustration white background`; 
-                const aiUrl = `https://image.pollinations.ai/prompt/${encodeURIComponent(prompt)}?width=400&height=400&nologo=true&seed=${Math.random()}`;
-                return { ...q, content: aiUrl };
+                // FALLBACK: NO AI GENERATION
+                // If we can't find an image, we essentially convert it to a text question or use a placeholder.
+                // However, returning a generic placeholder is better than breaking the game.
+                console.warn(`[GeminiService] No image found for '${q.content}'. Using placeholder.`);
+                return { 
+                    ...q, 
+                    content: "https://placehold.co/600x400/202020/FFFFFF?text=Image+Not+Found",
+                    type: 'text', // Fallback to text mode if image fails completely? 
+                                  // Or keep image type but show placeholder. Let's keep image type.
+                    questionText: `${q.questionText} (Image Unavailable)`
+                };
             }
         }
         return q;
