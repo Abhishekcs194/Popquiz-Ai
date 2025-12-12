@@ -10,16 +10,15 @@ RULES:
 1. **Bracket Logic**: The user input may contain brackets like "Pokemon(images)" or "History(easy)".
    - If "(images)" is present, 100% of questions MUST be 'image' type.
    
-2. **Image Sourcing Strategy (CRITICAL)**:
-   - For 'image' type questions, you must provide a **Wikipedia Page Title** or **Specific Subject** in the 'content' field.
-   - **Do NOT** use generic descriptions like "photo of a cat".
-   - **Do NOT** use URLs.
-   - **Examples**: 
-     - Correct: "Vaporeon" (Matches Wikipedia page)
-     - Correct: "The Starry Night" (Matches Wikipedia page)
-     - Correct: "Super Mario Bros." (Matches Wikipedia page)
-     - Incorrect: "A blue water pokemon" (No page match)
-   - The system will use this exact title to fetch the official Wikipedia thumbnail.
+2. **Image Sourcing Strategy**:
+   - For 'image' type questions, providing the **Correct Wikipedia Page Title** is critical.
+   - **Pop Culture**: For characters, movies, or games, use the specific page title.
+     - Use "Iron Man (character)" instead of "Iron Man".
+     - Use "Avatar (2009 film)" instead of "Avatar".
+     - Use "Vaporeon" (Unique enough).
+   - **Brands**: Use the company name (e.g. "Coca-Cola").
+   - **General**: Use the specific object name (e.g. "Eiffel Tower").
+   - The system will use this title to fetch the official Wikipedia Infobox image.
 
 3. **Ratio**: Unless "(images)" is specified, aim for ~35% 'image' type and ~65% 'text' type mix.
 
@@ -30,7 +29,7 @@ RULES:
    - For image questions, ensure the 'answer' matches the image you expect to be found.
 
 5. **Question Text**:
-   - For image questions, ALWAYS provide 'questionText' (e.g. "What game is this?", "Name this character", "Who painted this?").
+   - For image questions, ALWAYS provide 'questionText' (e.g. "Name this character", "What movie is this?", "Whose logo is this?").
 
 6. **No Emojis**: Do not use emoji puzzles unless explicitly asked.
 `;
@@ -71,7 +70,7 @@ export const generateQuestions = async (topic: string, count: number, existingAn
             properties: {
               id: { type: Type.STRING },
               type: { type: Type.STRING, enum: ['text', 'image'] },
-              content: { type: Type.STRING, description: "Wikipedia Page Title (e.g. 'Pikachu')" },
+              content: { type: Type.STRING, description: "Precise Wikipedia Page Title (e.g. 'Mario (character)')" },
               questionText: { type: Type.STRING, description: "The question to ask above the image" },
               answer: { type: Type.STRING, description: "The primary correct answer" },
               acceptedAnswers: { 
@@ -92,17 +91,15 @@ export const generateQuestions = async (topic: string, count: number, existingAn
     let questions = JSON.parse(text) as Question[];
     
     // --- POST-PROCESSING: Resolve Images ---
-    // We now have questions where content="Pikachu". We need to find the URL.
     const resolvedQuestions = await Promise.all(questions.map(async (q) => {
         if (q.type === 'image') {
-            // q.content is currently a page title like "Pikachu"
             const realUrl = await getWikimediaImage(q.content);
             
             if (realUrl) {
                 // Success: We found a real, valid Wikimedia thumbnail
                 return { ...q, content: realUrl };
             } else {
-                // Fallback: If Wikipedia search fails, generate an AI image
+                // Fallback: AI Generation
                 console.log(`[GeminiService] Wiki lookup failed for '${q.content}', using AI fallback.`);
                 const prompt = q.questionText || q.answer;
                 const aiUrl = `https://image.pollinations.ai/prompt/${encodeURIComponent(prompt)}?width=400&height=400&nologo=true&seed=${Math.random()}`;

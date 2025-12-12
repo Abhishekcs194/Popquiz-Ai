@@ -4,44 +4,64 @@ const COMMONS_API_URL = 'https://commons.wikimedia.org/w/api.php';
 /**
  * Searches for a high-quality image URL for a given topic.
  * 
- * Strategy 1: "Page Images" (Best)
- * Queries the specific Wikipedia page for the topic and gets its main thumbnail.
- * Perfect for: "Vaporeon", "Lionel Messi", "Ferrari".
- * 
- * Strategy 2: "Commons Search" (Fallback)
- * If no page/thumbnail exists, searches Wikimedia Commons for the term.
- * Perfect for: Obscure topics or generic terms.
+ * Strategy 1: Exact Page on EN Wiki (Best for Official Art/Logos)
+ * Strategy 2: Search on EN Wiki (Finds the correct page if name is slightly off)
+ * Strategy 3: Commons Search (Fallback for generic objects)
  */
 export const getWikimediaImage = async (query: string): Promise<string | null> => {
   try {
     // --- STRATEGY 1: Direct Wikipedia Page Lookup ---
-    // This finds the "main" image of the article (Infobox image), which is usually the best one.
     const pageParams = new URLSearchParams({
       action: 'query',
-      titles: query, // e.g. "Vaporeon"
+      titles: query,
       prop: 'pageimages',
       format: 'json',
-      pithumbsize: '500', // 500px width is a good balance of quality/speed
-      origin: '*' // CRITICAL: Allows CORS
+      pithumbsize: '500',
+      redirects: '1', // Follow redirects (e.g. "USA" -> "United States")
+      origin: '*'
     });
 
     const pageRes = await fetch(`${WIKI_API_URL}?${pageParams.toString()}`);
     const pageData = await pageRes.json();
-
+    
     if (pageData.query && pageData.query.pages) {
         const pages = pageData.query.pages;
-        // The API returns an object with pageId as keys. "-1" means page not found.
+        const pageId = Object.keys(pages)[0];
+        // -1 means page not found
+        if (pageId !== "-1" && pages[pageId].thumbnail) {
+             return pages[pageId].thumbnail.source;
+        }
+    }
+
+    // --- STRATEGY 2: English Wikipedia Search (The "Official Image" Fix) ---
+    // Instead of going to Commons (which has cosplay/fan art), we SEARCH English Wiki.
+    // This finds "Iron Man (character)" when given "Iron Man", keeping the official art.
+    const searchParams = new URLSearchParams({
+      action: 'query',
+      generator: 'search',
+      gsrsearch: query,
+      gsrlimit: '1',
+      prop: 'pageimages',
+      format: 'json',
+      pithumbsize: '500',
+      origin: '*'
+    });
+
+    const searchRes = await fetch(`${WIKI_API_URL}?${searchParams.toString()}`);
+    const searchData = await searchRes.json();
+
+    if (searchData.query && searchData.query.pages) {
+        const pages = searchData.query.pages;
         const pageId = Object.keys(pages)[0];
         
-        if (pageId !== "-1" && pages[pageId].thumbnail) {
-            // console.log(`[WikiService] Hit PageImage for: ${query}`);
+        if (pages[pageId].thumbnail) {
+            console.log(`[WikiService] Hit EnWiki Search for: ${query} -> ${pages[pageId].title}`);
             return pages[pageId].thumbnail.source;
         }
     }
 
-    // --- STRATEGY 2: Wikimedia Commons Search (Fallback) ---
-    // If the main page doesn't exist or has no image, search Commons.
-    // We use generator=search to find pages matching the query on Commons.
+    // --- STRATEGY 3: Wikimedia Commons (Last Resort) ---
+    // Only use this for generic things (e.g. "Toaster", "Mountain") where official art doesn't matter.
     const commonsParams = new URLSearchParams({
       action: 'query',
       generator: 'search',
@@ -61,12 +81,10 @@ export const getWikimediaImage = async (query: string): Promise<string | null> =
         const pageId = Object.keys(pages)[0];
         
         if (pages[pageId].thumbnail) {
-            console.log(`[WikiService] Hit Commons fallback for: ${query}`);
             return pages[pageId].thumbnail.source;
         }
     }
 
-    // If both fail, return null (caller will handle AI generation)
     return null;
 
   } catch (error) {
