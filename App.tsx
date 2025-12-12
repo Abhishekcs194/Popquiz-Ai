@@ -364,7 +364,11 @@ const App: React.FC = () => {
   };
 
   const handleToggleReady = () => {
-    if (isLocalHost(gameState.players)) return; 
+    if (isLocalHost(gameState.players)) {
+        // Host modifies local state directly
+        handlePlayerAction(localPlayerId, 'READY_TOGGLE', null);
+        return;
+    }
     multiplayer.send({
         type: 'PLAYER_ACTION',
         payload: { action: 'READY_TOGGLE' },

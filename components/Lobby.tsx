@@ -112,16 +112,27 @@ export const Lobby: React.FC<LobbyProps> = ({
 
         <div className="mt-8 pt-6 border-t border-white/10">
             {isHost ? (
-                 <Button 
-                    fullWidth 
-                    size="lg" 
-                    variant={canStart ? 'success' : 'primary'}
-                    onClick={onStart}
-                    disabled={!canStart}
-                    className={!canStart ? 'opacity-50 cursor-not-allowed' : 'animate-pulse'}
-                 >
-                    {players.length < 1 ? "Waiting for Players..." : !allReady ? "Waiting for Ready..." : "START GAME"}
-                 </Button>
+                <div className="space-y-3">
+                     <Button 
+                        fullWidth 
+                        size="lg" 
+                        variant={canStart ? 'success' : 'primary'}
+                        onClick={onStart}
+                        disabled={!canStart}
+                        className={!canStart ? 'opacity-50 cursor-not-allowed' : 'animate-pulse'}
+                     >
+                        {players.length < 1 ? "Waiting for Players..." : !allReady ? "Waiting for Everyone..." : "START GAME"}
+                     </Button>
+                     
+                     <div className="flex justify-center">
+                        <button
+                            onClick={onReady}
+                            className={`text-xs font-bold uppercase tracking-widest py-2 px-4 rounded-lg transition-colors ${localPlayer?.isReady ? 'text-white/30 hover:text-white/50' : 'bg-red-500 text-white animate-pulse'}`}
+                        >
+                            {localPlayer?.isReady ? "Tap to Unready" : "⚠️ HOST NOT READY - TAP HERE"}
+                        </button>
+                     </div>
+                </div>
             ) : (
                 <Button 
                     fullWidth 
