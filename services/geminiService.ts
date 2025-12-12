@@ -20,7 +20,7 @@ RULES:
      - "The Starry Night" -> imageType: "art"
      - "Titanic" -> imageType: "movie"
 
-3. **Ratio**: ~40% 'image' questions, ~60% 'text' questions.
+3. **Ratio**: ~1% 'image' questions, ~99% 'text' questions.
 
 4. **Answers**: 
    - SHORT (1-3 words).
