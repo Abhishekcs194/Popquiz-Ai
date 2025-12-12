@@ -3,33 +3,28 @@ import { Question } from "../types";
 import { getWikimediaImage } from "./wikiService";
 
 const SYSTEM_INSTRUCTION = `
-You are a trivia game content generator for a game called "PopQuiz".
-The goal is to generate fast-paced trivia where users TYPE the answer.
+You are a trivia game content generator for "PopQuiz".
+Generate fast-paced trivia where users TYPE the answer.
 
 RULES:
-1. **Bracket Logic**: The user input may contain brackets like "Pokemon(images)" or "History(easy)".
-   - If "(images)" is present, 100% of questions MUST be 'image' type.
+1. **Bracket Logic**: If user input has "(images)" (e.g. "Pokemon(images)"), ALL questions must be 'image' type.
    
-2. **Image Sourcing Strategy**:
-   - For 'image' type questions, provide a **Searchable Subject Name** in the 'content' field.
-   - **Pop Culture**: "Iron Man (character)", "Avatar (2009 film)", "Pikachu".
-   - **Brands**: "Coca-Cola logo", "Nike logo".
-   - **General**: "Eiffel Tower", "Lion", "DNA double helix".
-   - The system will search Wikipedia/Commons to find the best image.
-   - **Do NOT** use URLs.
+2. **Image Sourcing**:
+   - For 'image' questions, the 'content' field must be a **Wikipedia Search Term**.
+   - **Good**: "Iron Man", "Coca-Cola", "African Lion", "The Starry Night".
+   - **Bad**: "A picture of a superhero", "Red soda can".
+   - The system searches Wikipedia for this exact term.
 
-3. **Ratio**: Unless "(images)" is specified, aim for ~35% 'image' type and ~65% 'text' type mix.
+3. **Ratio**: ~35% 'image' questions, ~65% 'text' questions (unless "(images)" is used).
 
 4. **Answers**: 
-   - Must be SHORT (1-3 words max).
-   - **Unique**: No repeating answers.
-   - **Abbreviations**: Provide 'acceptedAnswers' for common aliases.
-   - For image questions, ensure the 'answer' matches the image likely to be found for your search term.
+   - SHORT (1-3 words).
+   - **Unique**: No duplicates.
+   - **Accepted Answers**: Provide aliases in 'acceptedAnswers'.
+   - Ensure the 'answer' matches the likely image for your search term.
 
 5. **Question Text**:
-   - For image questions, ALWAYS provide 'questionText' (e.g. "Name this character", "What movie is this?", "Whose logo is this?").
-
-6. **No Emojis**: Do not use emoji puzzles unless explicitly asked.
+   - For image questions, include 'questionText' (e.g. "Name this character", "Who painted this?").
 `;
 
 // Fisher-Yates Shuffle
@@ -49,15 +44,12 @@ export const generateQuestions = async (topic: string, count: number, existingAn
     }
 
     const ai = new GoogleGenAI({ apiKey });
-
-    // We cap the request to avoid token limits
     const safeCount = Math.min(count, 30); 
 
     const response = await ai.models.generateContent({
       model: "gemini-2.5-flash",
-      contents: `Generate ${safeCount} trivia questions based on these themes: "${topic}".
-      
-      Existing answers to avoid: ${JSON.stringify(existingAnswers)}.`,
+      contents: `Generate ${safeCount} trivia questions about: "${topic}".
+      Avoid these answers: ${JSON.stringify(existingAnswers)}.`,
       config: {
         systemInstruction: SYSTEM_INSTRUCTION,
         responseMimeType: "application/json",
@@ -68,9 +60,9 @@ export const generateQuestions = async (topic: string, count: number, existingAn
             properties: {
               id: { type: Type.STRING },
               type: { type: Type.STRING, enum: ['text', 'image'] },
-              content: { type: Type.STRING, description: "Search term for the image (e.g. 'Pikachu')" },
-              questionText: { type: Type.STRING, description: "The question to ask above the image" },
-              answer: { type: Type.STRING, description: "The primary correct answer" },
+              content: { type: Type.STRING, description: "Wikipedia Search Term (e.g. 'Pikachu')" },
+              questionText: { type: Type.STRING, description: "Question to ask above the image" },
+              answer: { type: Type.STRING, description: "The correct answer" },
               acceptedAnswers: { 
                 type: Type.ARRAY, 
                 items: { type: Type.STRING },
@@ -88,17 +80,17 @@ export const generateQuestions = async (topic: string, count: number, existingAn
 
     let questions = JSON.parse(text) as Question[];
     
-    // --- POST-PROCESSING: Resolve Images ---
+    // --- Post-Processing: Fetch Images ---
     const resolvedQuestions = await Promise.all(questions.map(async (q) => {
         if (q.type === 'image') {
+            // Try Wikipedia/Commons first
             const realUrl = await getWikimediaImage(q.content);
             
             if (realUrl) {
-                // Success: We found a real, valid Wikimedia thumbnail
                 return { ...q, content: realUrl };
             } else {
-                // Fallback: AI Generation (Last Resort)
-                console.log(`[GeminiService] Wiki lookup failed for '${q.content}', using AI fallback.`);
+                // LAST RESORT: AI Generation
+                console.log(`[GeminiService] Wiki failed for '${q.content}', using AI fallback.`);
                 const prompt = q.questionText || q.answer;
                 const aiUrl = `https://image.pollinations.ai/prompt/${encodeURIComponent(prompt)}?width=400&height=400&nologo=true&seed=${Math.random()}`;
                 return { ...q, content: aiUrl };
@@ -107,7 +99,6 @@ export const generateQuestions = async (topic: string, count: number, existingAn
         return q;
     }));
 
-    // Assign IDs and Shuffle
     const finalQuestions = resolvedQuestions.map((q, i) => ({ ...q, id: `${Date.now()}-${i}` }));
     return shuffleArray(finalQuestions);
 
