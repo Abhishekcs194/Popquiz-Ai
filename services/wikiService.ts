@@ -1,62 +1,116 @@
 const WIKI_API_URL = 'https://en.wikipedia.org/w/api.php';
 const COMMONS_API_URL = 'https://commons.wikimedia.org/w/api.php';
 
+// URLs that are too generic and should trigger a fallback (to AI or next search)
+const BLOCKLISTED_IMAGES = [
+  'International_Pok%C3%A9mon_logo',
+  'International_Pokémon_logo',
+  'Commons-logo',
+  'Wiki_letter_w',
+  'Disambig_gray'
+];
+
 /**
- * Reusable helper to search a Wiki API and return the first valid thumbnail.
+ * Checks if a URL is in the blocklist
  */
-async function searchWiki(apiUrl: string, query: string): Promise<string | null> {
-  // Use generator=search to find the most relevant pages
+const isBlocked = (url: string) => {
+  return BLOCKLISTED_IMAGES.some(term => url.includes(term));
+};
+
+/**
+ * Helper to search English Wikipedia Pages
+ */
+async function searchWikiPages(query: string): Promise<string | null> {
   const params = new URLSearchParams({
     action: 'query',
     generator: 'search',
     gsrsearch: query,
-    gsrlimit: '3', // Check top 3 results to find one with an image
+    gsrlimit: '3', 
     prop: 'pageimages',
-    pithumbsize: '500', // Standard clear resolution
+    pithumbsize: '500', 
     format: 'json',
-    origin: '*' // Required for CORS
+    origin: '*' 
   });
 
   try {
-    const res = await fetch(`${apiUrl}?${params.toString()}`);
+    const res = await fetch(`${WIKI_API_URL}?${params.toString()}`);
     const data = await res.json();
 
     if (!data.query || !data.query.pages) return null;
-
-    // The API returns pages as an object with random IDs. Convert to array.
     const pages = Object.values(data.query.pages) as any[];
 
-    // Return the first available image source
     for (const page of pages) {
       if (page.thumbnail && page.thumbnail.source) {
-        return page.thumbnail.source;
+        if (!isBlocked(page.thumbnail.source)) {
+            return page.thumbnail.source;
+        }
       }
     }
   } catch (error) {
-    console.warn(`[WikiService] Search failed for '${query}' at ${apiUrl}`);
+    console.warn(`[WikiService] Page search failed: ${query}`);
   }
+  return null;
+}
 
+/**
+ * Helper to search Commons FILES (Namespace 6)
+ * This finds "File:Pikachu.jpg" directly, avoiding generic page logos.
+ */
+async function searchCommonsFiles(query: string): Promise<string | null> {
+  const params = new URLSearchParams({
+    action: 'query',
+    generator: 'search',
+    gsrsearch: query,
+    gsrnamespace: '6', // 6 = File namespace
+    gsrlimit: '5',
+    prop: 'imageinfo',
+    iiprop: 'url',
+    iiurlwidth: '500', // Request thumbnail
+    format: 'json',
+    origin: '*'
+  });
+
+  try {
+    const res = await fetch(`${COMMONS_API_URL}?${params.toString()}`);
+    const data = await res.json();
+
+    if (!data.query || !data.query.pages) return null;
+    const pages = Object.values(data.query.pages) as any[];
+
+    for (const page of pages) {
+        if (page.imageinfo && page.imageinfo[0]) {
+            const info = page.imageinfo[0];
+            const url = info.thumburl || info.url;
+            if (url && !isBlocked(url)) {
+                return url;
+            }
+        }
+    }
+  } catch (error) {
+    console.warn(`[WikiService] File search failed: ${query}`);
+  }
   return null;
 }
 
 /**
  * Main function to get an image.
  * Strategy:
- * 1. English Wikipedia (Best for Pop Culture, Brands, Specific People)
- * 2. Wikimedia Commons (Best for General Objects, Nature, Locations)
+ * 1. English Wikipedia Page (Best for Official Context)
+ * 2. Commons FILES (Best for specific objects/characters without official pages)
+ * 3. Commons Page (Fallback)
  */
 export const getWikimediaImage = async (query: string): Promise<string | null> => {
   if (!query) return null;
   const cleanQuery = query.trim();
 
-  // Step 1: Try English Wikipedia
-  const wikiImage = await searchWiki(WIKI_API_URL, cleanQuery);
+  // 1. Wikipedia Page
+  const wikiImage = await searchWikiPages(cleanQuery);
   if (wikiImage) return wikiImage;
 
-  // Step 2: Try Wikimedia Commons
-  const commonsImage = await searchWiki(COMMONS_API_URL, cleanQuery);
-  if (commonsImage) return commonsImage;
+  // 2. Commons Files (NEW & IMPORTANT for "Pokemon" etc)
+  // Searching for "File:Pikachu" is better than searching Page "Pikachu" on Commons
+  const commonsFile = await searchCommonsFiles(cleanQuery);
+  if (commonsFile) return commonsFile;
 
-  // Step 3: Return null to trigger AI fallback in the caller
   return null;
 };

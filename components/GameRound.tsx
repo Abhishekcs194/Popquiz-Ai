@@ -75,15 +75,15 @@ export const GameRound: React.FC<GameRoundProps> = ({
   const [inputVal, setInputVal] = useState('');
   const [localState, setLocalState] = useState<'playing' | 'success' | 'failed'>('playing');
   const [shake, setShake] = useState(false);
-  const [isImageLoading, setIsImageLoading] = useState(false);
   
-  // Image Source State (allows us to swap URL if it fails)
+  // Image Loading State
+  const [isImageLoading, setIsImageLoading] = useState(false);
   const [currentImageSrc, setCurrentImageSrc] = useState(question.content);
   
   const inputRef = useRef<HTMLInputElement>(null);
   const showResult = gameStatus === 'round_result';
 
-  // Logic: When question ID changes, reset everything
+  // --- Reset logic when question changes ---
   useEffect(() => {
     if (gameStatus === 'playing') {
         setInputVal('');
@@ -91,12 +91,11 @@ export const GameRound: React.FC<GameRoundProps> = ({
         setShake(false);
         setCurrentImageSrc(question.content); // Reset image source
         
-        // Reset image loading state based on type
         if (question.type === 'image') {
             setIsImageLoading(true);
         } else {
             setIsImageLoading(false);
-            playSound.pop(); // Play sound immediately for text
+            playSound.pop();
         }
 
         setTimeout(() => {
@@ -107,6 +106,7 @@ export const GameRound: React.FC<GameRoundProps> = ({
 
   // Handle successful image load
   const handleImageLoad = () => {
+      // Only fire if we were waiting for it
       if (isImageLoading) {
           setIsImageLoading(false);
           playSound.pop();
@@ -117,17 +117,18 @@ export const GameRound: React.FC<GameRoundProps> = ({
   const handleImageError = () => {
       // If the URL we got from the service STILL fails (e.g. 403 or dead link),
       // we fallback to AI generation as a last resort.
+      console.log(`[GameRound] Image failed to load: ${currentImageSrc}`);
+
       if (!currentImageSrc.includes('pollinations.ai')) {
-          console.log(`[GameRound] Image load failed: ${currentImageSrc}, switching to AI fallback.`);
-          
           const prompt = question.questionText 
             ? `${question.questionText} ${question.answer}` 
             : question.answer;
             
           const fallbackUrl = `https://image.pollinations.ai/prompt/${encodeURIComponent(prompt)}?width=400&height=400&nologo=true&seed=${Math.random()}`;
+          console.log(`[GameRound] Switching to AI fallback: ${fallbackUrl}`);
           setCurrentImageSrc(fallbackUrl);
       } else {
-          // If even AI fails, stop loading
+          // If even AI fails, stop loading loop
           setIsImageLoading(false);
       }
   };
@@ -200,12 +201,15 @@ export const GameRound: React.FC<GameRoundProps> = ({
                                 </div>
                             )}
                             
+                            {/* Image with improved loading attributes */}
                             <img 
                                 key={currentImageSrc} 
                                 src={currentImageSrc} 
                                 onLoad={handleImageLoad}
                                 onError={handleImageError} 
                                 alt="Question" 
+                                loading="eager"
+                                crossOrigin="anonymous"
                                 className={`
                                     max-h-[350px] w-auto mx-auto rounded-xl shadow-2xl border-4 border-white object-contain bg-white transition-opacity duration-300
                                     ${isImageLoading ? 'opacity-0' : 'opacity-100'}
