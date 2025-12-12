@@ -4,9 +4,27 @@
 const WIKI_API_URL = 'https://en.wikipedia.org/w/api.php';
 const COMMONS_API_URL = 'https://commons.wikimedia.org/w/api.php';
 
-// Keys: Checking multiple formats to ensure we catch the environment variable
-const RAWG_API_KEY = process.env.RAWG_API_KEY || (import.meta as any).env?.VITE_RAWG_API_KEY || ''; 
-const TMDB_API_KEY = process.env.TMDB_API_KEY || (import.meta as any).env?.VITE_TMDB_API_KEY || ''; 
+// Keys: Accessing environment variables defined in vite.config.ts
+const RAWG_API_KEY = (process.env as any).RAWG_API_KEY || ''; 
+const TMDB_API_KEY = (process.env as any).TMDB_API_KEY || '';
+
+// CORS Proxy for RAWG images (media.rawg.io blocks CORS)
+// Using reliable CORS proxy services with fallbacks
+const getCorsProxyUrl = (imageUrl: string): string => {
+    if (!imageUrl || !imageUrl.includes('media.rawg.io')) {
+        return imageUrl; // No proxy needed for non-RAWG images
+    }
+    
+    try {
+        // Use corsproxy.io - reliable and free CORS proxy
+        // Format: https://corsproxy.io/?URL
+        return `https://corsproxy.io/?${encodeURIComponent(imageUrl)}`;
+    } catch (e) {
+        console.warn(`[ImageService] Failed to create CORS proxy URL:`, e);
+        // Return original URL as last resort (will show CORS error but image link will work)
+        return imageUrl;
+    }
+}; 
 
 // --- VALIDATION & FILTERING ---
 
@@ -63,32 +81,70 @@ const fetchAnimeImage = async (query: string): Promise<string | null> => {
 };
 
 // --- 3. GAMES (RAWG) ---
-// Only effective if we are looking for the GAME TITLE itself.
-const fetchRawgImage = async (query: string): Promise<string | null> => {
+// Enhanced RAWG search with multiple query variations for better matching
+const fetchRawgImage = async (query: string, tryVariations: boolean = true): Promise<string | null> => {
     if (!RAWG_API_KEY) {
         console.warn(`[ImageService] RAWG_API_KEY missing. Cannot fetch game image.`);
         return null;
     }
-    try {
-        console.log(`[ImageService] Fetching RAWG for: "${query}"...`);
-        const res = await fetch(`https://api.rawg.io/api/games?search=${encodeURIComponent(query)}&key=${RAWG_API_KEY}&page_size=1`);
-        
-        if (!res.ok) {
-            console.error(`[ImageService] RAWG Request Failed: ${res.status} ${res.statusText}`);
-            return null;
-        }
 
-        const data = await res.json();
-        if (data.results && data.results.length > 0) {
-            console.log(`[ImageService] RAWG Match: ${data.results[0].name}`);
-            return data.results[0].background_image;
+    // Try multiple query variations to improve match rate
+    const queryVariations = tryVariations ? [
+        query, // Original query
+        query.replace(/\(.*?\)/g, '').trim(), // Remove parentheses content
+        query.split('(')[0].trim(), // Everything before first parenthesis
+        query.split(':')[0].trim(), // Everything before colon
+        query.split('-')[0].trim(), // Everything before dash
+    ].filter((q, i, arr) => q && arr.indexOf(q) === i) : [query]; // Remove duplicates
+
+    for (const searchQuery of queryVariations) {
+        if (!searchQuery) continue;
+        
+        try {
+            console.log(`[ImageService] Fetching RAWG for: "${searchQuery}"...`);
+            const url = `https://api.rawg.io/api/games?search=${encodeURIComponent(searchQuery)}&key=${RAWG_API_KEY}&page_size=5`;
+            const res = await fetch(url);
+            
+            if (!res.ok) {
+                const errorText = await res.text();
+                console.error(`[ImageService] RAWG Request Failed: ${res.status} ${res.statusText}`, errorText);
+                continue; // Try next variation
+            }
+
+            const data = await res.json();
+            if (data.results && data.results.length > 0) {
+                // Try to find the best match (exact or close match)
+                let bestMatch = data.results[0];
+                
+                // Look for exact name match
+                const exactMatch = data.results.find((game: any) => 
+                    game.name.toLowerCase() === searchQuery.toLowerCase() ||
+                    game.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
+                    searchQuery.toLowerCase().includes(game.name.toLowerCase())
+                );
+                
+                if (exactMatch) {
+                    bestMatch = exactMatch;
+                }
+                
+                const imageUrl = bestMatch.background_image || 
+                                (bestMatch.short_screenshots && bestMatch.short_screenshots[0]?.image) ||
+                                (bestMatch.short_screenshots && bestMatch.short_screenshots.find((s: any) => s.image)?.image);
+                
+                if (imageUrl) {
+                    console.log(`[ImageService] RAWG Match: ${bestMatch.name}`, 'Image found');
+                    // Apply CORS proxy to RAWG images
+                    return getCorsProxyUrl(imageUrl);
+                }
+            }
+        } catch (e) { 
+            console.error(`[ImageService] RAWG Error for "${searchQuery}":`, e);
+            continue; // Try next variation
         }
-        console.warn(`[ImageService] RAWG found no results for: "${query}"`);
-        return null;
-    } catch (e) { 
-        console.error(`[ImageService] RAWG Error:`, e);
-        return null; 
     }
+    
+    console.warn(`[ImageService] RAWG found no results for all variations of: "${query}"`);
+    return null;
 };
 
 // --- 4. MOVIES (TMDB) ---
@@ -205,27 +261,69 @@ async function runWikiSearch(query: string, type: string): Promise<string | null
   return candidates.length > 0 ? candidates[Math.floor(Math.random() * candidates.length)] : null;
 }
 
+// Helper function to detect if query/topic is game-related
+const isGameRelated = (query: string, type?: string, topic?: string): boolean => {
+    const safeType = type || 'general';
+    const queryLC = query.toLowerCase();
+    const topicLC = topic?.toLowerCase() || '';
+    
+    // Explicit game type
+    if (safeType === 'game') return true;
+    
+    // Topic-based detection
+    const gameTopicKeywords = [
+        'game', 'gaming', 'esports', 'playstation', 'xbox', 'nintendo', 
+        'steam', 'pc game', 'video game', 'console', 'gamer',
+        'nintendo switch', 'ps5', 'ps4', 'xbox series', 'xbox one',
+        'pc gaming', 'mobile game', 'indie game', 'retro game'
+    ];
+    if (gameTopicKeywords.some(keyword => topicLC.includes(keyword))) return true;
+    
+    // Query-based detection (common game-related terms)
+    const gameQueryKeywords = [
+        'game', 'video game', 'series', 'edition', 'remastered', 'remake',
+        'dlc', 'expansion', 'sequel', 'prequel', 'franchise'
+    ];
+    if (gameQueryKeywords.some(keyword => queryLC.includes(keyword))) return true;
+    
+    // Check for common game title patterns
+    const gamePatterns = [
+        /\d{4}$/, // Years at the end (e.g., "Call of Duty 2023")
+        /^(the|a|an)\s+.+\s+(game|adventure|quest|legend|story)$/i, // "The [Something] Game"
+    ];
+    if (gamePatterns.some(pattern => pattern.test(query))) return true;
+    
+    return false;
+};
+
 // --- MASTER ROUTER ---
 export const getSmartImage = async (query: string, type?: string, topic?: string): Promise<string | null> => {
     const safeType = type || 'general';
     let imageUrl: string | null = null;
     
-    const topicLC = topic?.toLowerCase() || '';
-    const isGameContext = topicLC.includes('game') || topicLC.includes('gaming') || topicLC.includes('esports') || topicLC.includes('playstation') || topicLC.includes('xbox') || topicLC.includes('nintendo');
+    // CRITICAL: Check if this is game-related FIRST
+    const isGame = isGameRelated(query, safeType, topic);
+    
+    if (isGame) {
+        // FORCE RAWG API for ALL game-related queries - NO FALLBACKS
+        console.log(`[ImageService] Game context detected for "${query}" - Using RAWG API exclusively`);
+        imageUrl = await fetchRawgImage(query, true);
+        
+        if (!imageUrl) {
+            console.warn(`[ImageService] RAWG failed for game query "${query}" - Returning null (no fallbacks allowed)`);
+            return null; // Return null instead of falling back to other sources
+        }
+        
+        return imageUrl;
+    }
 
-    // 1. Specific High-Quality APIs
+    // 1. Specific High-Quality APIs (non-game)
     if (safeType === 'pokemon') imageUrl = await fetchPokemonImage(query);
     else if (safeType === 'anime') imageUrl = await fetchAnimeImage(query);
     else if (safeType === 'flag') imageUrl = await fetchFlagImage(query);
     else if (safeType === 'art') imageUrl = await fetchArtImage(query);
     
-    // 2. Pop Culture (Games/Movies)
-    // We now Force RAWG check if the TOPIC implies games, even if the question type is generic
-    else if (safeType === 'game' || (safeType === 'general' && isGameContext)) {
-        imageUrl = await fetchRawgImage(query);
-        // Fallback to iTunes Software search if RAWG fails
-        if (!imageUrl) imageUrl = await fetchItunesImage(query, 'game');
-    }
+    // 2. Movies (non-game)
     else if (safeType === 'movie') {
         imageUrl = await fetchTmdbImage(query);
         if (!imageUrl) imageUrl = await fetchItunesImage(query, 'movie');
@@ -233,29 +331,31 @@ export const getSmartImage = async (query: string, type?: string, topic?: string
 
     if (imageUrl) return imageUrl;
 
-    // 3. Fallback: iTunes Global Search
-    if (safeType === 'general' || safeType === 'character') {
+    // 3. Fallback: iTunes Global Search (ONLY for non-game queries)
+    if ((safeType === 'general' || safeType === 'character') && !isGame) {
          const itunesFallback = await fetchItunesImage(query, 'all');
          if (itunesFallback) return itunesFallback;
     }
 
-    // 4. Wiki Strategy
-    
-    // Strategy A: Subject + Topic
-    if (topic && !query.toLowerCase().includes(topicLC)) {
-        imageUrl = await runWikiSearch(`${query} ${topic}`, safeType);
-        if (imageUrl) return imageUrl;
-    }
+    // 4. Wiki Strategy (ONLY for non-game queries)
+    if (!isGame) {
+        // Strategy A: Subject + Topic
+        const topicLC = topic?.toLowerCase() || '';
+        if (topic && !query.toLowerCase().includes(topicLC)) {
+            imageUrl = await runWikiSearch(`${query} ${topic}`, safeType);
+            if (imageUrl) return imageUrl;
+        }
 
-    // Strategy B: Subject + Type
-    const categorySuffix = safeType === 'character' ? 'character' : safeType === 'game' ? 'video game' : safeType;
-    if (categorySuffix && categorySuffix !== 'general') {
-        imageUrl = await runWikiSearch(`${query} ${categorySuffix}`, safeType);
-        if (imageUrl) return imageUrl;
-    }
+        // Strategy B: Subject + Type
+        const categorySuffix = safeType === 'character' ? 'character' : safeType === 'game' ? 'video game' : safeType;
+        if (categorySuffix && categorySuffix !== 'general') {
+            imageUrl = await runWikiSearch(`${query} ${categorySuffix}`, safeType);
+            if (imageUrl) return imageUrl;
+        }
 
-    // Strategy C: Subject Only
-    imageUrl = await runWikiSearch(query, safeType);
+        // Strategy C: Subject Only
+        imageUrl = await runWikiSearch(query, safeType);
+    }
     
     return imageUrl;
 };

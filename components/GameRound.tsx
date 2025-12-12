@@ -198,7 +198,6 @@ export const GameRound: React.FC<GameRoundProps> = ({
                                 onError={handleImageError} 
                                 alt="Question" 
                                 loading="eager"
-                                crossOrigin="anonymous"
                                 className={`
                                     max-h-[220px] md:max-h-[350px] w-auto mx-auto rounded-xl shadow-2xl border-4 border-white object-contain bg-white transition-opacity duration-300
                                     ${isImageLoading ? 'opacity-0' : 'opacity-100'}

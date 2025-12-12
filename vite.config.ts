@@ -12,7 +12,9 @@ export default defineConfig(({ mode }) => {
       plugins: [react()],
       define: {
         'process.env.API_KEY': JSON.stringify(env.GEMINI_API_KEY),
-        'process.env.GEMINI_API_KEY': JSON.stringify(env.GEMINI_API_KEY)
+        'process.env.GEMINI_API_KEY': JSON.stringify(env.GEMINI_API_KEY),
+        'process.env.RAWG_API_KEY': JSON.stringify(env.RAWG_API_KEY || env.VITE_RAWG_API_KEY),
+        'process.env.TMDB_API_KEY': JSON.stringify(env.TMDB_API_KEY || env.VITE_TMDB_API_KEY)
       },
       resolve: {
         alias: {
