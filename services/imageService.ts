@@ -13,11 +13,12 @@ const TMDB_API_KEY = process.env.TMDB_API_KEY || ''; // For Movies
 const SPAM_TERMS = [
   'stub', 'disambig', 'wiki_letter', 'chart', 'diagram',
   'store', 'shop', 'center', 'building', 'mall', 'plush', 'toy', 'merch', 'card', 'box',
-  'cosplay', 'costume', 'suit', 'human', 'man', 'woman', 'person', 'convention', 'event', 'fan',
+  'cosplay', 'costume', 'suit', 'human', 'man', 'woman', 'person', 'people', 'convention', 'event', 'fan',
   'advert', 'pdf', 'svg', 'webm', 'ogv',
   // New visual noise filters
   'graffiti', 'mural', 'street_art', 'sculpture', 'statue', 'lego', 'cake', 'food',
-  'booth', 'stand', 'expo', 'stage', 'screen', 'display', 'monitor'
+  'booth', 'stand', 'expo', 'stage', 'screen', 'display', 'monitor', 'trash', 'bin', 'rubbish',
+  'magazine', 'cover', 'page', 'book'
 ];
 
 const CONTEXT_TERMS = {
@@ -64,7 +65,10 @@ const fetchAnimeImage = async (query: string): Promise<string | null> => {
 // --- 3. GAMES (RAWG) ---
 // Only effective if we are looking for the GAME TITLE itself.
 const fetchRawgImage = async (query: string): Promise<string | null> => {
-    if (!RAWG_API_KEY) return null;
+    if (!RAWG_API_KEY) {
+        console.warn(`[ImageService] RAWG_API_KEY missing. Skipping RAWG.`);
+        return null;
+    }
     try {
         const res = await fetch(`https://api.rawg.io/api/games?search=${encodeURIComponent(query)}&key=${RAWG_API_KEY}&page_size=1`);
         const data = await res.json();
@@ -92,17 +96,22 @@ const fetchTmdbImage = async (query: string): Promise<string | null> => {
 
 // --- 5. ITUNES (Fallback for Movies & Games) ---
 // Excellent for Official Posters and App Icons (which look like covers)
-const fetchItunesImage = async (query: string, type: 'movie' | 'game'): Promise<string | null> => {
+// Updated: Now accepts 'all' to try and find ANY media match before falling back to Wiki trash
+const fetchItunesImage = async (query: string, type: 'movie' | 'game' | 'all'): Promise<string | null> => {
     try {
-        const entity = type === 'movie' ? 'movie' : 'software';
-        // software searches the App Store. Good for "Minecraft", "Among Us", "PUBG", etc.
-        const res = await fetch(`https://itunes.apple.com/search?term=${encodeURIComponent(query)}&media=${entity}&limit=1`);
+        let media = 'all';
+        if (type === 'movie') media = 'movie';
+        if (type === 'game') media = 'software';
+
+        const res = await fetch(`https://itunes.apple.com/search?term=${encodeURIComponent(query)}&media=${media}&limit=3`);
         if (!res.ok) return null;
         const data = await res.json();
         
         if (data.results && data.results.length > 0) {
-            // Get the 100x100 url and upgrade it to 600x600 for high res
-            const smallUrl = data.results[0].artworkUrl100;
+            // Prefer 600x600 artwork
+            // We iterate to find one that looks "square-ish" or "poster-ish" if possible, but 1st is usually best match
+            const item = data.results[0];
+            const smallUrl = item.artworkUrl100; 
             if (smallUrl) {
                 return smallUrl.replace('100x100', '600x600');
             }
@@ -153,7 +162,7 @@ async function runWikiSearch(query: string, type: string): Promise<string | null
       }
   };
 
-  // A. Page Images (Best for "Official" things like Game Covers that are Fair Use on Wiki)
+  // A. Page Images (Best for "Official" things)
   try {
       const params = new URLSearchParams({
         action: 'query', generator: 'search', gsrsearch: query, gsrlimit: '3', 
@@ -167,15 +176,16 @@ async function runWikiSearch(query: string, type: string): Promise<string | null
   if (candidates.length > 0) return candidates[0]; 
 
   // B. Commons Files (Backup)
-  // WARNING: Commons DOES NOT host copyrighted game covers or movie posters. 
-  // It only hosts fan photos, cosplay, and graffiti.
-  // We SKIP this for games/movies to avoid bad images.
-  if (type === 'game' || type === 'movie') {
+  // Commons is notoriously filled with bad images for Pop Culture.
+  // We ONLY use it for very specific types (Art, Places, Objects).
+  // We BLOCK it for Games, Movies, and Characters to avoid Cosplay/Graffiti.
+  if (type === 'game' || type === 'movie' || type === 'character' || type === 'anime') {
       return null;
   }
 
   try {
-      const spamFilter = '-cosplay -costume -pdf -webm -text -graffiti -sculpture';
+      // Aggressive negative filtering
+      const spamFilter = '-cosplay -costume -pdf -webm -text -graffiti -sculpture -person -people -man -woman';
       const searchQuery = `${query} ${spamFilter}`; 
       const params = new URLSearchParams({
         action: 'query', generator: 'search', gsrsearch: searchQuery, 
@@ -201,11 +211,7 @@ export const getSmartImage = async (query: string, type?: string, topic?: string
     else if (safeType === 'flag') imageUrl = await fetchFlagImage(query);
     else if (safeType === 'art') imageUrl = await fetchArtImage(query);
     
-    // Game/Movie Strategy:
-    // 1. Private Key APIs (Best)
-    // 2. iTunes API (Great for Posters/Icons, No Key)
-    // 3. Wiki Page Images (Good for Covers)
-    // 4. SKIP Commons (Avoids Graffiti/Cosplay)
+    // 2. Pop Culture (Games/Movies) - Keyed APIs -> iTunes -> Wiki Pages -> NO COMMONS
     else if (safeType === 'game') {
         imageUrl = await fetchRawgImage(query);
         if (!imageUrl) imageUrl = await fetchItunesImage(query, 'game');
@@ -217,7 +223,18 @@ export const getSmartImage = async (query: string, type?: string, topic?: string
 
     if (imageUrl) return imageUrl;
 
-    // 2. Iterative Wiki Fallback Strategy
+    // 3. Fallback: iTunes Global Search
+    // If specific game/movie searches failed (or type was generic but it's actually a pop culture item),
+    // iTunes is often cleaner than Wiki.
+    // We try this for 'general' and 'character' too before hitting Wiki trash.
+    if (safeType === 'general' || safeType === 'character') {
+         // Try finding an "App" or "Movie" or "Song" with this name.
+         // Often a character name returns the Movie/Game poster they are in, which is perfect.
+         const itunesFallback = await fetchItunesImage(query, 'all');
+         if (itunesFallback) return itunesFallback;
+    }
+
+    // 4. Wiki Strategy (Strict)
     
     // Strategy A: Subject + Topic
     if (topic && !query.toLowerCase().includes(topic.toLowerCase())) {

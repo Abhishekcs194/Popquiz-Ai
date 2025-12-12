@@ -10,17 +10,17 @@ RULES:
 1. **Bracket Logic**: If user input has "(images)" (e.g. "Pokemon(images)"), ALL questions must be 'image' type.
    
 2. **Image Sourcing**:
-   - For 'image' questions, provide the **Full Official Name** of the visual subject in 'content' (e.g. "Iron Fist Alexander" instead of "Alexander").
-   - **IMPORTANT**: Classify the image type in 'imageType':
+   - For 'image' questions, provide the **Full Official Name** of the visual subject in 'content'.
+   - Example: Use "Super Mario Bros. Wonder" (Game) or "Mario (character)" instead of just "Mario".
+   - **CRITICAL**: Classify the image type accurately in 'imageType':
      - "Pikachu" -> imageType: "pokemon"
      - "France" -> imageType: "flag"
-     - "Super Mario Bros" (The Game) -> imageType: "game"
-     - "Mario" (The Person) -> imageType: "character"
-     - "Iron Man" -> imageType: "character"
-     - "Elden Ring" -> imageType: "game"
-     - "Starry Night" -> imageType: "art"
+     - "Call of Duty" -> imageType: "game" (Even if query is generic)
+     - "Iron Man" -> imageType: "character" (Will fall back to Movie posters usually)
+     - "The Starry Night" -> imageType: "art"
+     - "Titanic" -> imageType: "movie"
 
-3. **Ratio**: ~35% 'image' questions, ~65% 'text' questions (unless "(images)" is used).
+3. **Ratio**: ~40% 'image' questions, ~60% 'text' questions.
 
 4. **Answers**: 
    - SHORT (1-3 words).
@@ -28,7 +28,7 @@ RULES:
    - **Accepted Answers**: Provide aliases.
 
 5. **Question Text**:
-   - For image questions, include 'questionText' (e.g. "Name this character").
+   - For image questions, include 'questionText' (e.g. "Name this character", "Which game is this?").
 `;
 
 // Fisher-Yates Shuffle
