@@ -40,7 +40,6 @@ const isValidWikiImage = (url: string, query: string, type: string = 'general'):
 // --- 1. POKÉMON (PokéAPI) ---
 const fetchPokemonImage = async (query: string): Promise<string | null> => {
     try {
-        // Strip extra context like "Pokemon" from the query if present
         const cleanName = query.toLowerCase().replace('pokemon', '').trim().replace(/[^a-z0-9-]/g, '');
         const res = await fetch(`https://pokeapi.co/api/v2/pokemon/${cleanName}`);
         if (!res.ok) return null;
@@ -60,6 +59,7 @@ const fetchAnimeImage = async (query: string): Promise<string | null> => {
 };
 
 // --- 3. GAMES (RAWG) ---
+// Only effective if we are looking for the GAME TITLE itself.
 const fetchRawgImage = async (query: string): Promise<string | null> => {
     if (!RAWG_API_KEY) return null;
     try {
@@ -115,8 +115,9 @@ const fetchArtImage = async (query: string): Promise<string | null> => {
     } catch (e) { return null; }
 };
 
-// --- 7. UNIVERSAL FALLBACK: WIKI ---
-async function fetchRandomWikiImage(query: string, type: string = 'general'): Promise<string | null> {
+// --- 7. WIKI HELPER ---
+// Internal helper to run a specific wiki query
+async function runWikiSearch(query: string, type: string): Promise<string | null> {
   const candidates: string[] = [];
   
   const collectCandidates = (pages: any[]) => {
@@ -128,10 +129,10 @@ async function fetchRandomWikiImage(query: string, type: string = 'general'): Pr
       }
   };
 
-  // Wikipedia Page Images
+  // A. Page Images
   try {
       const params = new URLSearchParams({
-        action: 'query', generator: 'search', gsrsearch: query, gsrlimit: '5', 
+        action: 'query', generator: 'search', gsrsearch: query, gsrlimit: '3', 
         prop: 'pageimages', pithumbsize: '600', format: 'json', origin: '*' 
       });
       const res = await fetch(`${WIKI_API_URL}?${params.toString()}`);
@@ -139,15 +140,15 @@ async function fetchRandomWikiImage(query: string, type: string = 'general'): Pr
       if (data.query?.pages) collectCandidates(data.query.pages);
   } catch(e) {}
 
-  // Commons Files
+  if (candidates.length > 0) return candidates[0]; // Return first best
+
+  // B. Commons Files (Backup)
   try {
-      // Broaden search
       const spamFilter = '-cosplay -costume -pdf -webm -text';
       const searchQuery = `${query} ${spamFilter}`; 
-
       const params = new URLSearchParams({
         action: 'query', generator: 'search', gsrsearch: searchQuery, 
-        gsrnamespace: '6', gsrlimit: '20', 
+        gsrnamespace: '6', gsrlimit: '10', 
         prop: 'imageinfo', iiprop: 'url', iiurlwidth: '600', format: 'json', origin: '*'
       });
       const res = await fetch(`${COMMONS_API_URL}?${params.toString()}`);
@@ -155,29 +156,43 @@ async function fetchRandomWikiImage(query: string, type: string = 'general'): Pr
       if (data.query?.pages) collectCandidates(data.query.pages);
   } catch(e) {}
 
-  if (candidates.length > 0) {
-      return candidates[Math.floor(Math.random() * candidates.length)];
-  }
-  return null;
+  return candidates.length > 0 ? candidates[Math.floor(Math.random() * candidates.length)] : null;
 }
 
-// --- MASTER ROUTER ---
-export const getSmartImage = async (query: string, type?: string): Promise<string | null> => {
+// --- MASTER ROUTER WITH ITERATIVE FALLBACK ---
+export const getSmartImage = async (query: string, type?: string, topic?: string): Promise<string | null> => {
     const safeType = type || 'general';
     let imageUrl: string | null = null;
     
-    // 1. Try Specific API
+    // 1. Try Specific API (If exact type match)
     if (safeType === 'pokemon') imageUrl = await fetchPokemonImage(query);
     else if (safeType === 'anime') imageUrl = await fetchAnimeImage(query);
-    else if (safeType === 'game') imageUrl = await fetchRawgImage(query); // New RAWG
-    else if (safeType === 'movie') imageUrl = await fetchTmdbImage(query); // New TMDB
     else if (safeType === 'flag') imageUrl = await fetchFlagImage(query);
     else if (safeType === 'art') imageUrl = await fetchArtImage(query);
+    
+    // Only use RAWG/TMDB if the type is explicitly game/movie. 
+    // If type is 'character', we skip to Wiki to avoid finding the Game cover instead of the Character.
+    else if (safeType === 'game') imageUrl = await fetchRawgImage(query); 
+    else if (safeType === 'movie') imageUrl = await fetchTmdbImage(query);
 
-    // 2. Fallback to Wiki with Full Context
-    if (!imageUrl) {
-        imageUrl = await fetchRandomWikiImage(query, safeType);
+    if (imageUrl) return imageUrl;
+
+    // 2. Iterative Wiki Fallback Strategy
+    // Strategy A: Subject + Topic (e.g. "Iron Fist Alexander Elden Ring") - Most Specific
+    if (topic && !query.toLowerCase().includes(topic.toLowerCase())) {
+        imageUrl = await runWikiSearch(`${query} ${topic}`, safeType);
+        if (imageUrl) return imageUrl;
     }
+
+    // Strategy B: Subject + Type (e.g. "Iron Fist Alexander Video Game" or "Character")
+    const categorySuffix = safeType === 'character' ? 'character' : safeType === 'game' ? 'video game' : safeType;
+    if (categorySuffix && categorySuffix !== 'general') {
+        imageUrl = await runWikiSearch(`${query} ${categorySuffix}`, safeType);
+        if (imageUrl) return imageUrl;
+    }
+
+    // Strategy C: Subject Only (e.g. "Iron Fist Alexander") - Broadest
+    imageUrl = await runWikiSearch(query, safeType);
     
     return imageUrl;
 };

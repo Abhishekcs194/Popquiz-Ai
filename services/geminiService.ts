@@ -10,13 +10,15 @@ RULES:
 1. **Bracket Logic**: If user input has "(images)" (e.g. "Pokemon(images)"), ALL questions must be 'image' type.
    
 2. **Image Sourcing**:
-   - For 'image' questions, provide the **Visual Subject** in 'content' (e.g. "Pikachu", "Iron Man").
-   - **IMPORTANT**: Classify the image type in 'imageType' (pokemon, anime, flag, logo, art, game, movie, general).
+   - For 'image' questions, provide the **Full Official Name** of the visual subject in 'content' (e.g. "Iron Fist Alexander" instead of "Alexander").
+   - **IMPORTANT**: Classify the image type in 'imageType':
      - "Pikachu" -> imageType: "pokemon"
      - "France" -> imageType: "flag"
-     - "Naruto" -> imageType: "anime"
-     - "Starry Night" -> imageType: "art"
+     - "Super Mario Bros" (The Game) -> imageType: "game"
+     - "Mario" (The Person) -> imageType: "character"
+     - "Iron Man" -> imageType: "character"
      - "Elden Ring" -> imageType: "game"
+     - "Starry Night" -> imageType: "art"
 
 3. **Ratio**: ~35% 'image' questions, ~65% 'text' questions (unless "(images)" is used).
 
@@ -62,14 +64,14 @@ export const generateQuestions = async (topic: string, count: number, existingAn
             properties: {
               id: { type: Type.STRING },
               type: { type: Type.STRING, enum: ['text', 'image'] },
-              content: { type: Type.STRING, description: "Search Term" },
+              content: { type: Type.STRING, description: "Visual Subject Search Term" },
               questionText: { type: Type.STRING },
               answer: { type: Type.STRING },
               acceptedAnswers: { type: Type.ARRAY, items: { type: Type.STRING } },
               category: { type: Type.STRING },
               imageType: { 
                   type: Type.STRING, 
-                  enum: ['pokemon', 'anime', 'flag', 'logo', 'art', 'game', 'movie', 'general', 'animal'],
+                  enum: ['pokemon', 'anime', 'flag', 'logo', 'art', 'game', 'movie', 'character', 'general', 'animal'],
                   description: "Category for API routing" 
               }
             },
@@ -87,25 +89,13 @@ export const generateQuestions = async (topic: string, count: number, existingAn
     // --- Post-Processing: Fetch Images using Smart Router ---
     const resolvedQuestions = await Promise.all(questions.map(async (q): Promise<Question> => {
         if (q.type === 'image') {
-            // Context Injection: Append topic to query if strictly needed
-            // This prevents "Rennala" -> finding a random person named Rennala
-            // Becomes "Rennala Elden Ring"
-            let searchContext = q.content;
-            const needsContext = ['game', 'anime', 'movie', 'book', 'character'].includes(q.imageType || '');
-            
-            if (needsContext && topic) {
-                // Simple check to avoid double inclusion "Elden Ring Elden Ring"
-                if (!searchContext.toLowerCase().includes(topic.toLowerCase())) {
-                    searchContext = `${searchContext} ${topic}`;
-                }
-            }
-
-            const realUrl = await getSmartImage(searchContext, q.imageType);
+            // Pass content and topic separately to let the Smart Router handle the fallback logic
+            const realUrl = await getSmartImage(q.content, q.imageType, topic);
             
             if (realUrl) {
                 return { ...q, content: realUrl };
             } else {
-                console.warn(`[GeminiService] No image found for '${searchContext}'. Using placeholder.`);
+                console.warn(`[GeminiService] No image found for '${q.content}'. Using placeholder.`);
                 return { 
                     ...q, 
                     content: "https://placehold.co/600x400/202020/FFFFFF?text=Image+Unavailable",
