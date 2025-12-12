@@ -10,7 +10,7 @@ RULES:
 1. **Bracket Logic**: If user input has "(images)" (e.g. "Pokemon(images)"), ALL questions must be 'image' type.
    
 2. **Image Sourcing**:
-   - For 'image' questions, provide the **Wikipedia Search Term** in 'content'.
+   - For 'image' questions, provide the **Visual Subject** in 'content' (e.g. "Pikachu", "Iron Man").
    - **IMPORTANT**: Classify the image type in 'imageType' (pokemon, anime, flag, logo, art, game, movie, general).
      - "Pikachu" -> imageType: "pokemon"
      - "France" -> imageType: "flag"
@@ -87,19 +87,29 @@ export const generateQuestions = async (topic: string, count: number, existingAn
     // --- Post-Processing: Fetch Images using Smart Router ---
     const resolvedQuestions = await Promise.all(questions.map(async (q): Promise<Question> => {
         if (q.type === 'image') {
-            // Use the new Smart Router
-            const realUrl = await getSmartImage(q.content, q.imageType);
+            // Context Injection: Append topic to query if strictly needed
+            // This prevents "Rennala" -> finding a random person named Rennala
+            // Becomes "Rennala Elden Ring"
+            let searchContext = q.content;
+            const needsContext = ['game', 'anime', 'movie', 'book', 'character'].includes(q.imageType || '');
+            
+            if (needsContext && topic) {
+                // Simple check to avoid double inclusion "Elden Ring Elden Ring"
+                if (!searchContext.toLowerCase().includes(topic.toLowerCase())) {
+                    searchContext = `${searchContext} ${topic}`;
+                }
+            }
+
+            const realUrl = await getSmartImage(searchContext, q.imageType);
             
             if (realUrl) {
                 return { ...q, content: realUrl };
             } else {
-                // FALLBACK: NO AI GENERATION
-                // Use a standard placeholder service that is reliable, or a local asset pattern if available.
-                console.warn(`[GeminiService] No image found for '${q.content}'. Using placeholder.`);
+                console.warn(`[GeminiService] No image found for '${searchContext}'. Using placeholder.`);
                 return { 
                     ...q, 
                     content: "https://placehold.co/600x400/202020/FFFFFF?text=Image+Unavailable",
-                    type: 'image', // Keep as image type so the UI handles it as an image question (albeit broken)
+                    type: 'image', 
                     questionText: `${q.questionText} (Image Missing)`
                 };
             }

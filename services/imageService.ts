@@ -4,9 +4,12 @@
 const WIKI_API_URL = 'https://en.wikipedia.org/w/api.php';
 const COMMONS_API_URL = 'https://commons.wikimedia.org/w/api.php';
 
+// Keys (optional, for better Game/Movie results)
+const RAWG_API_KEY = process.env.RAWG_API_KEY || ''; // For Games
+const TMDB_API_KEY = process.env.TMDB_API_KEY || ''; // For Movies
+
 // --- VALIDATION & FILTERING ---
 
-// Terms that are ALWAYS garbage/spam for a trivia game
 const SPAM_TERMS = [
   'stub', 'disambig', 'wiki_letter', 'chart', 'diagram',
   'store', 'shop', 'center', 'building', 'mall', 'plush', 'toy', 'merch', 'card', 'box',
@@ -14,7 +17,6 @@ const SPAM_TERMS = [
   'advert', 'pdf', 'svg', 'webm', 'ogv'
 ];
 
-// Terms that are undesirable UNLESS the specific type requests them
 const CONTEXT_TERMS = {
     logo: ['logo', 'icon', 'symbol'],
     flag: ['flag', 'map'],
@@ -29,19 +31,8 @@ const isValidWikiImage = (url: string, query: string, type: string = 'general'):
   if (SPAM_TERMS.some(term => cleanUrl.includes(term))) return false;
   
   // 2. Context-aware filtering
-  // If we are NOT looking for a logo, filter out logos.
-  if (type !== 'logo' && CONTEXT_TERMS.logo.some(term => cleanUrl.includes(term))) {
-      return false;
-  }
-  // If we are NOT looking for a flag, filter out flags/maps (unless it's geography/general)
-  if (type !== 'flag' && type !== 'general' && type !== 'country' && CONTEXT_TERMS.flag.some(term => cleanUrl.includes(term))) {
-      return false;
-  }
-
-  // 3. (REMOVED) Strict Token Matching
-  // Previously we required the filename to contain the query words. 
-  // This blocked "Godrick_the_Grafted.jpg" when searching "Elden Ring".
-  // Now we trust the search engine relevance, filtering only known bad patterns.
+  if (type !== 'logo' && CONTEXT_TERMS.logo.some(term => cleanUrl.includes(term))) return false;
+  if (type !== 'flag' && type !== 'general' && type !== 'country' && CONTEXT_TERMS.flag.some(term => cleanUrl.includes(term))) return false;
 
   return true;
 };
@@ -49,7 +40,8 @@ const isValidWikiImage = (url: string, query: string, type: string = 'general'):
 // --- 1. POKÉMON (PokéAPI) ---
 const fetchPokemonImage = async (query: string): Promise<string | null> => {
     try {
-        const cleanName = query.trim().toLowerCase().replace(/[^a-z0-9-]/g, '');
+        // Strip extra context like "Pokemon" from the query if present
+        const cleanName = query.toLowerCase().replace('pokemon', '').trim().replace(/[^a-z0-9-]/g, '');
         const res = await fetch(`https://pokeapi.co/api/v2/pokemon/${cleanName}`);
         if (!res.ok) return null;
         const data = await res.json();
@@ -57,7 +49,7 @@ const fetchPokemonImage = async (query: string): Promise<string | null> => {
     } catch (e) { return null; }
 };
 
-// --- 2. ANIME (Jikan/MyAnimeList) ---
+// --- 2. ANIME (Jikan) ---
 const fetchAnimeImage = async (query: string): Promise<string | null> => {
     try {
         const res = await fetch(`https://api.jikan.moe/v4/characters?q=${encodeURIComponent(query)}&limit=1`);
@@ -67,18 +59,47 @@ const fetchAnimeImage = async (query: string): Promise<string | null> => {
     } catch (e) { return null; }
 };
 
-// --- 3. FLAGS (RestCountries) ---
+// --- 3. GAMES (RAWG) ---
+const fetchRawgImage = async (query: string): Promise<string | null> => {
+    if (!RAWG_API_KEY) return null;
+    try {
+        const res = await fetch(`https://api.rawg.io/api/games?search=${encodeURIComponent(query)}&key=${RAWG_API_KEY}&page_size=1`);
+        const data = await res.json();
+        if (data.results && data.results.length > 0) {
+            return data.results[0].background_image;
+        }
+        return null;
+    } catch (e) { return null; }
+};
+
+// --- 4. MOVIES (TMDB) ---
+const fetchTmdbImage = async (query: string): Promise<string | null> => {
+    if (!TMDB_API_KEY) return null;
+    try {
+        const res = await fetch(`https://api.themoviedb.org/3/search/multi?query=${encodeURIComponent(query)}&api_key=${TMDB_API_KEY}`);
+        const data = await res.json();
+        if (data.results && data.results.length > 0) {
+            const item = data.results[0];
+            const path = item.backdrop_path || item.poster_path;
+            if (path) return `https://image.tmdb.org/t/p/w780${path}`;
+        }
+        return null;
+    } catch (e) { return null; }
+};
+
+// --- 5. FLAGS (RestCountries) ---
 const fetchFlagImage = async (query: string): Promise<string | null> => {
     try {
-        let res = await fetch(`https://restcountries.com/v3.1/name/${encodeURIComponent(query)}?fullText=true`);
-        if (!res.ok) res = await fetch(`https://restcountries.com/v3.1/name/${encodeURIComponent(query)}`);
+        const cleanQuery = query.replace('flag', '').trim();
+        let res = await fetch(`https://restcountries.com/v3.1/name/${encodeURIComponent(cleanQuery)}?fullText=true`);
+        if (!res.ok) res = await fetch(`https://restcountries.com/v3.1/name/${encodeURIComponent(cleanQuery)}`);
         if(!res.ok) return null;
         const data = await res.json();
         return data[0]?.flags?.png || null;
     } catch (e) { return null; }
 };
 
-// --- 4. ART (Met Museum) ---
+// --- 6. ART (Met Museum) ---
 const fetchArtImage = async (query: string): Promise<string | null> => {
     try {
         const searchRes = await fetch(`https://collectionapi.metmuseum.org/public/collection/v1/search?q=${encodeURIComponent(query)}&hasImages=true`);
@@ -94,7 +115,7 @@ const fetchArtImage = async (query: string): Promise<string | null> => {
     } catch (e) { return null; }
 };
 
-// --- 5. UNIVERSAL FALLBACK: RANDOMIZED WIKI SEARCH ---
+// --- 7. UNIVERSAL FALLBACK: WIKI ---
 async function fetchRandomWikiImage(query: string, type: string = 'general'): Promise<string | null> {
   const candidates: string[] = [];
   
@@ -107,7 +128,7 @@ async function fetchRandomWikiImage(query: string, type: string = 'general'): Pr
       }
   };
 
-  // A. Wikipedia Page Images (High Relevance)
+  // Wikipedia Page Images
   try {
       const params = new URLSearchParams({
         action: 'query', generator: 'search', gsrsearch: query, gsrlimit: '5', 
@@ -118,11 +139,9 @@ async function fetchRandomWikiImage(query: string, type: string = 'general'): Pr
       if (data.query?.pages) collectCandidates(data.query.pages);
   } catch(e) {}
 
-  // B. Wikimedia Commons Search (High Variety)
+  // Commons Files
   try {
-      // NOTE: Removed "File:" prefix from gsrsearch to broaden results.
-      // gsrnamespace=6 already restricts to files.
-      // Exclude key spam terms in the query itself for efficiency.
+      // Broaden search
       const spamFilter = '-cosplay -costume -pdf -webm -text';
       const searchQuery = `${query} ${spamFilter}`; 
 
@@ -136,12 +155,9 @@ async function fetchRandomWikiImage(query: string, type: string = 'general'): Pr
       if (data.query?.pages) collectCandidates(data.query.pages);
   } catch(e) {}
 
-  // C. Random Selection
   if (candidates.length > 0) {
-      const randomIndex = Math.floor(Math.random() * candidates.length);
-      return candidates[randomIndex];
+      return candidates[Math.floor(Math.random() * candidates.length)];
   }
-
   return null;
 }
 
@@ -153,10 +169,12 @@ export const getSmartImage = async (query: string, type?: string): Promise<strin
     // 1. Try Specific API
     if (safeType === 'pokemon') imageUrl = await fetchPokemonImage(query);
     else if (safeType === 'anime') imageUrl = await fetchAnimeImage(query);
+    else if (safeType === 'game') imageUrl = await fetchRawgImage(query); // New RAWG
+    else if (safeType === 'movie') imageUrl = await fetchTmdbImage(query); // New TMDB
     else if (safeType === 'flag') imageUrl = await fetchFlagImage(query);
     else if (safeType === 'art') imageUrl = await fetchArtImage(query);
 
-    // 2. Fallback to Wiki
+    // 2. Fallback to Wiki with Full Context
     if (!imageUrl) {
         imageUrl = await fetchRandomWikiImage(query, safeType);
     }
