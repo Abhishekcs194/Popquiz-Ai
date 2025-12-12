@@ -1,6 +1,6 @@
 import { GoogleGenAI, Type } from "@google/genai";
 import { Question } from "../types";
-import { getWikimediaImage } from "./wikiService";
+import { getSmartImage } from "./imageService";
 
 const SYSTEM_INSTRUCTION = `
 You are a trivia game content generator for "PopQuiz".
@@ -10,21 +10,22 @@ RULES:
 1. **Bracket Logic**: If user input has "(images)" (e.g. "Pokemon(images)"), ALL questions must be 'image' type.
    
 2. **Image Sourcing**:
-   - For 'image' questions, the 'content' field must be a **Wikipedia Search Term**.
-   - **Good**: "Iron Man", "Coca-Cola", "African Lion", "The Starry Night".
-   - **Bad**: "A picture of a superhero", "Red soda can".
-   - The system searches Wikipedia for this exact term.
+   - For 'image' questions, provide the **Wikipedia Search Term** in 'content'.
+   - **IMPORTANT**: Classify the image type in 'imageType' (pokemon, anime, flag, logo, art, general).
+     - "Pikachu" -> imageType: "pokemon"
+     - "France" -> imageType: "flag"
+     - "Naruto" -> imageType: "anime"
+     - "Starry Night" -> imageType: "art"
 
 3. **Ratio**: ~35% 'image' questions, ~65% 'text' questions (unless "(images)" is used).
 
 4. **Answers**: 
    - SHORT (1-3 words).
    - **Unique**: No duplicates.
-   - **Accepted Answers**: Provide aliases in 'acceptedAnswers'.
-   - Ensure the 'answer' matches the likely image for your search term.
+   - **Accepted Answers**: Provide aliases.
 
 5. **Question Text**:
-   - For image questions, include 'questionText' (e.g. "Name this character", "Who painted this?").
+   - For image questions, include 'questionText' (e.g. "Name this character").
 `;
 
 // Fisher-Yates Shuffle
@@ -60,14 +61,16 @@ export const generateQuestions = async (topic: string, count: number, existingAn
             properties: {
               id: { type: Type.STRING },
               type: { type: Type.STRING, enum: ['text', 'image'] },
-              content: { type: Type.STRING, description: "Wikipedia Search Term (e.g. 'Pikachu')" },
-              questionText: { type: Type.STRING, description: "Question to ask above the image" },
-              answer: { type: Type.STRING, description: "The correct answer" },
-              acceptedAnswers: { 
-                type: Type.ARRAY, 
-                items: { type: Type.STRING },
-              },
-              category: { type: Type.STRING }
+              content: { type: Type.STRING, description: "Search Term" },
+              questionText: { type: Type.STRING },
+              answer: { type: Type.STRING },
+              acceptedAnswers: { type: Type.ARRAY, items: { type: Type.STRING } },
+              category: { type: Type.STRING },
+              imageType: { 
+                  type: Type.STRING, 
+                  enum: ['pokemon', 'anime', 'flag', 'logo', 'art', 'general', 'animal'],
+                  description: "Category for API routing" 
+              }
             },
             required: ['id', 'type', 'content', 'answer']
           }
@@ -80,18 +83,18 @@ export const generateQuestions = async (topic: string, count: number, existingAn
 
     let questions = JSON.parse(text) as Question[];
     
-    // --- Post-Processing: Fetch Images ---
+    // --- Post-Processing: Fetch Images using Smart Router ---
     const resolvedQuestions = await Promise.all(questions.map(async (q) => {
         if (q.type === 'image') {
-            // Try Wikipedia/Commons first
-            const realUrl = await getWikimediaImage(q.content);
+            // Use the new Smart Router
+            const realUrl = await getSmartImage(q.content, q.imageType);
             
             if (realUrl) {
                 return { ...q, content: realUrl };
             } else {
                 // LAST RESORT: AI Generation
-                console.log(`[GeminiService] Wiki failed for '${q.content}', using AI fallback.`);
-                const prompt = q.questionText || q.answer;
+                console.log(`[GeminiService] All APIs failed for '${q.content}' (${q.imageType}), using AI fallback.`);
+                const prompt = `${q.content} ${q.imageType || ''} illustration white background`; 
                 const aiUrl = `https://image.pollinations.ai/prompt/${encodeURIComponent(prompt)}?width=400&height=400&nologo=true&seed=${Math.random()}`;
                 return { ...q, content: aiUrl };
             }

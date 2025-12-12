@@ -6,6 +6,7 @@ export interface Question {
   answer: string;
   acceptedAnswers?: string[]; // Array of valid aliases/abbreviations
   category?: string;
+  imageType?: 'pokemon' | 'anime' | 'flag' | 'logo' | 'art' | 'general'; // Routing hint
 }
 
 export type GameStatus = 'landing' | 'lobby' | 'generating' | 'playing' | 'round_result' | 'game_over';
