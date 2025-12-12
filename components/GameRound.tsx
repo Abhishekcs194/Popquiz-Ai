@@ -79,6 +79,7 @@ export const GameRound: React.FC<GameRoundProps> = ({
   // Image Loading State
   const [isImageLoading, setIsImageLoading] = useState(false);
   const [currentImageSrc, setCurrentImageSrc] = useState(question.content);
+  const [imageError, setImageError] = useState(false);
   
   const inputRef = useRef<HTMLInputElement>(null);
   const showResult = gameStatus === 'round_result';
@@ -89,7 +90,8 @@ export const GameRound: React.FC<GameRoundProps> = ({
         setInputVal('');
         setLocalState('playing');
         setShake(false);
-        setCurrentImageSrc(question.content); // Reset image source
+        setCurrentImageSrc(question.content);
+        setImageError(false);
         
         if (question.type === 'image') {
             setIsImageLoading(true);
@@ -106,31 +108,18 @@ export const GameRound: React.FC<GameRoundProps> = ({
 
   // Handle successful image load
   const handleImageLoad = () => {
-      // Only fire if we were waiting for it
       if (isImageLoading) {
           setIsImageLoading(false);
           playSound.pop();
       }
   };
 
-  // Handle image load error (Self-Healing)
+  // Handle image load error (No AI Fallback)
   const handleImageError = () => {
-      // If the URL we got from the service STILL fails (e.g. 403 or dead link),
-      // we fallback to AI generation as a last resort.
       console.log(`[GameRound] Image failed to load: ${currentImageSrc}`);
-
-      if (!currentImageSrc.includes('pollinations.ai')) {
-          const prompt = question.questionText 
-            ? `${question.questionText} ${question.answer}` 
-            : question.answer;
-            
-          const fallbackUrl = `https://image.pollinations.ai/prompt/${encodeURIComponent(prompt)}?width=400&height=400&nologo=true&seed=${Math.random()}`;
-          console.log(`[GameRound] Switching to AI fallback: ${fallbackUrl}`);
-          setCurrentImageSrc(fallbackUrl);
-      } else {
-          // If even AI fails, stop loading loop
-          setIsImageLoading(false);
-      }
+      setIsImageLoading(false);
+      setImageError(true);
+      setCurrentImageSrc("https://placehold.co/600x400/202020/FFFFFF?text=Image+Load+Error"); 
   };
 
   const handleSubmit = (e: React.FormEvent) => {
@@ -195,13 +184,13 @@ export const GameRound: React.FC<GameRoundProps> = ({
                         
                         <div className="relative inline-block group mb-4 min-h-[200px] flex items-center justify-center">
                              {/* Loading Spinner */}
-                             {isImageLoading && (
+                             {isImageLoading && !imageError && (
                                 <div className="absolute inset-0 flex items-center justify-center z-10 bg-black/20 backdrop-blur-sm rounded-xl">
                                     <div className="w-12 h-12 border-4 border-white/30 border-t-yellow-400 rounded-full animate-spin"></div>
                                 </div>
                             )}
                             
-                            {/* Image with improved loading attributes */}
+                            {/* Image */}
                             <img 
                                 key={currentImageSrc} 
                                 src={currentImageSrc} 
@@ -213,6 +202,7 @@ export const GameRound: React.FC<GameRoundProps> = ({
                                 className={`
                                     max-h-[350px] w-auto mx-auto rounded-xl shadow-2xl border-4 border-white object-contain bg-white transition-opacity duration-300
                                     ${isImageLoading ? 'opacity-0' : 'opacity-100'}
+                                    ${imageError ? 'grayscale opacity-50' : ''}
                                 `}
                             />
                         </div>

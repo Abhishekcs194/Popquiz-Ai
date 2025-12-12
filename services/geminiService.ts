@@ -11,11 +11,12 @@ RULES:
    
 2. **Image Sourcing**:
    - For 'image' questions, provide the **Wikipedia Search Term** in 'content'.
-   - **IMPORTANT**: Classify the image type in 'imageType' (pokemon, anime, flag, logo, art, general).
+   - **IMPORTANT**: Classify the image type in 'imageType' (pokemon, anime, flag, logo, art, game, movie, general).
      - "Pikachu" -> imageType: "pokemon"
      - "France" -> imageType: "flag"
      - "Naruto" -> imageType: "anime"
      - "Starry Night" -> imageType: "art"
+     - "Elden Ring" -> imageType: "game"
 
 3. **Ratio**: ~35% 'image' questions, ~65% 'text' questions (unless "(images)" is used).
 
@@ -68,7 +69,7 @@ export const generateQuestions = async (topic: string, count: number, existingAn
               category: { type: Type.STRING },
               imageType: { 
                   type: Type.STRING, 
-                  enum: ['pokemon', 'anime', 'flag', 'logo', 'art', 'general', 'animal'],
+                  enum: ['pokemon', 'anime', 'flag', 'logo', 'art', 'game', 'movie', 'general', 'animal'],
                   description: "Category for API routing" 
               }
             },
@@ -93,15 +94,13 @@ export const generateQuestions = async (topic: string, count: number, existingAn
                 return { ...q, content: realUrl };
             } else {
                 // FALLBACK: NO AI GENERATION
-                // If we can't find an image, we essentially convert it to a text question or use a placeholder.
-                // However, returning a generic placeholder is better than breaking the game.
+                // Use a standard placeholder service that is reliable, or a local asset pattern if available.
                 console.warn(`[GeminiService] No image found for '${q.content}'. Using placeholder.`);
                 return { 
                     ...q, 
-                    content: "https://placehold.co/600x400/202020/FFFFFF?text=Image+Not+Found",
-                    type: 'text', // Fallback to text mode if image fails completely? 
-                                  // Or keep image type but show placeholder. Let's keep image type.
-                    questionText: `${q.questionText} (Image Unavailable)`
+                    content: "https://placehold.co/600x400/202020/FFFFFF?text=Image+Unavailable",
+                    type: 'image', // Keep as image type so the UI handles it as an image question (albeit broken)
+                    questionText: `${q.questionText} (Image Missing)`
                 };
             }
         }
