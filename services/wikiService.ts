@@ -1,20 +1,55 @@
 const WIKI_API_URL = 'https://en.wikipedia.org/w/api.php';
 const COMMONS_API_URL = 'https://commons.wikimedia.org/w/api.php';
 
-// URLs that are too generic and should trigger a fallback (to AI or next search)
-const BLOCKLISTED_IMAGES = [
+// URLs/Filenames that are too generic and should trigger a fallback
+const BLOCKLIST = [
   'International_Pok%C3%A9mon_logo',
   'International_Pokémon_logo',
   'Commons-logo',
   'Wiki_letter_w',
-  'Disambig_gray'
+  'Disambig_gray',
+  'Icon',
+  'Stub',
+  'Flag',
+  'Map',
+  'Store',
+  'Shop',
+  'Center',
+  'Building',
+  'Mall'
 ];
 
 /**
- * Checks if a URL is in the blocklist
+ * Validates if an image is relevant to the query.
+ * 1. Checks blocklist.
+ * 2. Checks if at least one meaningful word from the query appears in the filename.
  */
-const isBlocked = (url: string) => {
-  return BLOCKLISTED_IMAGES.some(term => url.includes(term));
+const isValidImage = (url: string, query: string): boolean => {
+  if (!url) return false;
+  
+  const cleanUrl = decodeURIComponent(url).toLowerCase();
+  
+  // 1. Check Blocklist
+  if (BLOCKLIST.some(term => cleanUrl.includes(term.toLowerCase()))) {
+    return false;
+  }
+
+  // 2. Keyword Matching (Strict Mode)
+  // We want to ensure the image actually represents the search term.
+  // Query: "Lapras" -> Tokens: ["lapras"]
+  // URL: ".../Pokemon_Center_Tokyo.jpg" -> Fail
+  // URL: ".../Lapras_drawing.jpg" -> Pass
+  
+  const cleanQuery = query.toLowerCase().replace(/[^a-z0-9\s]/g, '');
+  const queryTokens = cleanQuery.split(' ').filter(t => t.length > 3); // Ignore "the", "and", etc.
+
+  // If query is very short (e.g. "Cat"), just trust the search result unless blocked
+  if (queryTokens.length === 0) return true;
+
+  // Check if ANY significant token matches the filename
+  const hasMatch = queryTokens.some(token => cleanUrl.includes(token));
+  
+  return hasMatch;
 };
 
 /**
@@ -25,7 +60,7 @@ async function searchWikiPages(query: string): Promise<string | null> {
     action: 'query',
     generator: 'search',
     gsrsearch: query,
-    gsrlimit: '3', 
+    gsrlimit: '5', 
     prop: 'pageimages',
     pithumbsize: '500', 
     format: 'json',
@@ -41,7 +76,7 @@ async function searchWikiPages(query: string): Promise<string | null> {
 
     for (const page of pages) {
       if (page.thumbnail && page.thumbnail.source) {
-        if (!isBlocked(page.thumbnail.source)) {
+        if (isValidImage(page.thumbnail.source, query)) {
             return page.thumbnail.source;
         }
       }
@@ -54,7 +89,6 @@ async function searchWikiPages(query: string): Promise<string | null> {
 
 /**
  * Helper to search Commons FILES (Namespace 6)
- * This finds "File:Pikachu.jpg" directly, avoiding generic page logos.
  */
 async function searchCommonsFiles(query: string): Promise<string | null> {
   const params = new URLSearchParams({
@@ -81,7 +115,8 @@ async function searchCommonsFiles(query: string): Promise<string | null> {
         if (page.imageinfo && page.imageinfo[0]) {
             const info = page.imageinfo[0];
             const url = info.thumburl || info.url;
-            if (url && !isBlocked(url)) {
+            // Strict check on Commons files too
+            if (url && isValidImage(url, query)) {
                 return url;
             }
         }
@@ -94,10 +129,6 @@ async function searchCommonsFiles(query: string): Promise<string | null> {
 
 /**
  * Main function to get an image.
- * Strategy:
- * 1. English Wikipedia Page (Best for Official Context)
- * 2. Commons FILES (Best for specific objects/characters without official pages)
- * 3. Commons Page (Fallback)
  */
 export const getWikimediaImage = async (query: string): Promise<string | null> => {
   if (!query) return null;
@@ -107,8 +138,7 @@ export const getWikimediaImage = async (query: string): Promise<string | null> =
   const wikiImage = await searchWikiPages(cleanQuery);
   if (wikiImage) return wikiImage;
 
-  // 2. Commons Files (NEW & IMPORTANT for "Pokemon" etc)
-  // Searching for "File:Pikachu" is better than searching Page "Pikachu" on Commons
+  // 2. Commons Files
   const commonsFile = await searchCommonsFiles(cleanQuery);
   if (commonsFile) return commonsFile;
 
