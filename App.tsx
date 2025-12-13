@@ -83,41 +83,116 @@ const App: React.FC = () => {
   // 1. Connection Lifecycle
   useEffect(() => {
     if (gameState.roomId) {
+      console.log(`[App] Connecting to room: ${gameState.roomId}`);
       multiplayer.connect(gameState.roomId, (msg) => handleNetworkMessage(msg));
+      
+      // If we're the host, broadcast state when connection is ready
+      const checkAndBroadcast = () => {
+        const current = gameStateRef.current;
+        if (isLocalHost(current.players) && current.players.length > 0) {
+          const connectionState = multiplayer.getConnectionState();
+          if (connectionState.isConnected || connectionState.peerCount > 0) {
+            console.log(`[Host] Broadcasting initial state to ${connectionState.peerCount} peers`);
+            multiplayer.send({ 
+              type: 'STATE_UPDATE', 
+              payload: current 
+            });
+          } else {
+            // Retry after a short delay
+            setTimeout(checkAndBroadcast, 1000);
+          }
+        }
+      };
+      
+      // Wait a bit for connection to establish, then check and broadcast
+      setTimeout(checkAndBroadcast, 2000);
     }
-    return () => multiplayer.disconnect();
+    return () => {
+      console.log(`[App] Disconnecting from room`);
+      multiplayer.disconnect();
+    };
   }, [gameState.roomId]);
 
-  // 2. Join Request Retry Loop
+  // 2. Join Request Retry Loop (with connection readiness check)
   useEffect(() => {
     let interval: number;
+    let timeout: number;
+    let attemptCount = 0;
+    const maxAttempts = 20; // 30 seconds max (20 * 1.5s)
 
     if (gameState.status === 'lobby' && gameState.players.length === 0 && !isLocalHost(gameState.players)) {
       const tryJoin = () => {
+         attemptCount++;
+         const connectionState = multiplayer.getConnectionState();
+         
          if (pendingJoinRef.current) {
-             console.log("[App] Broadcasting JOIN_REQUEST to mesh...");
-             multiplayer.send({
-                 type: 'JOIN_REQUEST',
-                 payload: pendingJoinRef.current,
-                 senderId: localPlayerId
-             });
+             // Only send if connection is ready or we're the host (first peer)
+             if (connectionState.isConnected || connectionState.peerCount === 0) {
+                 console.log(`[App] Broadcasting JOIN_REQUEST to mesh... (attempt ${attemptCount})`);
+                 const sent = multiplayer.send({
+                     type: 'JOIN_REQUEST',
+                     payload: pendingJoinRef.current,
+                     senderId: localPlayerId
+                 });
+                 
+                 if (!sent) {
+                     console.warn(`[App] Failed to send JOIN_REQUEST, connection not ready`);
+                 }
+             } else {
+                 console.log(`[App] Waiting for connection... (${connectionState.peerCount} peers)`);
+             }
+         }
+
+         // Stop retrying after max attempts
+         if (attemptCount >= maxAttempts) {
+             console.warn(`[App] Max join attempts reached. Stopping retry.`);
+             clearInterval(interval);
          }
       };
+      
+      // Start immediately
       tryJoin();
+      // Then retry every 1.5 seconds
       interval = window.setInterval(tryJoin, 1500);
+      
+      // Set overall timeout
+      timeout = window.setTimeout(() => {
+        clearInterval(interval);
+      }, maxAttempts * 1500);
     }
-    return () => clearInterval(interval);
-  }, [gameState.status, gameState.players.length, gameState.roomId]);
+    
+    return () => {
+      if (interval) clearInterval(interval);
+      if (timeout) clearTimeout(timeout);
+    };
+  }, [gameState.status, gameState.players.length, gameState.roomId, localPlayerId]);
 
   // 3. Handle Incoming Messages
   const handleNetworkMessage = (msg: NetworkMessage) => {
     const current = gameStateRef.current;
     
+    // Ignore messages from ourselves
+    if (msg.senderId === localPlayerId) {
+      return;
+    }
+
+    // Validate message has required fields
+    if (!msg.type || !msg.senderId) {
+      console.warn('[App] Received invalid message:', msg);
+      return;
+    }
+    
     switch (msg.type) {
       case 'JOIN_REQUEST':
         if (isLocalHost(current.players)) {
+          // Validate payload
+          if (!msg.payload || !msg.payload.name || !msg.payload.avatar) {
+            console.warn('[App] Invalid JOIN_REQUEST payload:', msg.payload);
+            return;
+          }
+
           const newPlayer: Player = {
-            id: msg.senderId!,
+            id: msg.senderId,
             name: msg.payload.name,
             avatar: msg.payload.avatar,
             score: 0,
@@ -132,26 +207,55 @@ const App: React.FC = () => {
           let nextState = current;
 
           if (!playerExists) {
-             console.log(`[Host] Accepting new player: ${newPlayer.name}`);
+             console.log(`[Host] Accepting new player: ${newPlayer.name} (${newPlayer.id})`);
              nextState = updateState({ 
                  players: [...current.players, newPlayer] 
              });
+             
+             // Send state update with retry logic
+             const sendStateUpdate = () => {
+               const sent = multiplayer.send({ type: 'STATE_UPDATE', payload: nextState });
+               if (!sent) {
+                 console.warn('[Host] Failed to send STATE_UPDATE, retrying...');
+                 setTimeout(sendStateUpdate, 500);
+               }
+             };
+             sendStateUpdate();
           }
-          multiplayer.send({ type: 'STATE_UPDATE', payload: nextState });
         }
         break;
 
       case 'STATE_UPDATE':
+        // Only accept state updates if we're not the host or if we have no players (initial sync)
         if (!isLocalHost(current.players) || current.players.length === 0) {
-            updateState(msg.payload);
+            // Validate payload structure
+            if (msg.payload && typeof msg.payload === 'object') {
+                console.log('[App] Received STATE_UPDATE');
+                updateState(msg.payload);
+            } else {
+                console.warn('[App] Invalid STATE_UPDATE payload');
+            }
         }
         break;
 
       case 'PLAYER_ACTION':
         if (isLocalHost(current.players)) {
-          handlePlayerAction(msg.senderId!, msg.payload.action, msg.payload.data);
+          // Validate action payload
+          if (msg.payload && msg.payload.action) {
+            handlePlayerAction(msg.senderId, msg.payload.action, msg.payload.data);
+          } else {
+            console.warn('[App] Invalid PLAYER_ACTION payload:', msg.payload);
+          }
         }
         break;
+
+      case 'PING':
+      case 'PONG':
+        // Handled by multiplayer service
+        break;
+
+      default:
+        console.warn('[App] Unknown message type:', msg.type);
     }
   };
 
