@@ -484,6 +484,13 @@ const App: React.FC = () => {
     window.location.href = window.location.origin;
   };
 
+  const handleExitGame = () => {
+    if (!isLocalHost(gameState.players)) return;
+    // End the game and show game over screen with current scores
+    const newState = updateState({ status: 'game_over' });
+    broadcast(newState);
+  };
+
 
   // --- Render ---
 
@@ -542,6 +549,8 @@ const App: React.FC = () => {
             startTime={gameState.roundStartTime}
             onAnswer={handleAnswer}
             gameStatus={gameState.status}
+            isHost={isLocalHost(gameState.players)}
+            onExit={handleExitGame}
           />
         )}
 

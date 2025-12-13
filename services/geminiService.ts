@@ -10,13 +10,13 @@ RULES:
 1. **Bracket Logic**: If user input has "(images)" (e.g. "Pokemon(images)"), ALL questions must be 'image' type.
    
 2. **Image Sourcing**:
-   - For 'image' questions, provide the **Full Official Name** of the visual subject in 'content'.
-   - Example: Use "Super Mario Bros. Wonder" (Game) or "Mario (character)" instead of just "Mario".
-   - **CRITICAL**: Classify the image type accurately in 'imageType':
+   - For 'image' questions, the image will be fetched based on the **answer** field (what the image shows).
+   - The 'content' field is not used for image fetching - images are always fetched using the correct answer.
+   - **CRITICAL**: Classify the image type accurately in 'imageType' based on what the answer represents:
      - "Pikachu" -> imageType: "pokemon"
      - "France" -> imageType: "flag"
-     - "Call of Duty" -> imageType: "game" (Even if query is generic)
-     - "Iron Man" -> imageType: "character" (Will fall back to Movie posters usually)
+     - "Call of Duty" -> imageType: "game"
+     - "Iron Man" -> imageType: "character"
      - "The Starry Night" -> imageType: "art"
      - "Titanic" -> imageType: "movie"
 
@@ -93,13 +93,13 @@ export const generateQuestions = async (topic: string, count: number, existingAn
     // --- Post-Processing: Fetch Images using Smart Router ---
     const resolvedQuestions = await Promise.all(questions.map(async (q): Promise<Question> => {
         if (q.type === 'image') {
-            // Pass content and topic separately to let the Smart Router handle the fallback logic
-            const realUrl = await getSmartImage(q.content, q.imageType, topic);
+            // Use the answer to fetch the image (the image should show what the answer is)
+            const realUrl = await getSmartImage(q.answer, q.imageType, topic);
             
             if (realUrl) {
                 return { ...q, content: realUrl };
             } else {
-                console.warn(`[GeminiService] No image found for '${q.content}'. Using placeholder.`);
+                console.warn(`[GeminiService] No image found for answer '${q.answer}'. Using placeholder.`);
                 return { 
                     ...q, 
                     content: "https://placehold.co/600x400/202020/FFFFFF?text=Image+Unavailable",

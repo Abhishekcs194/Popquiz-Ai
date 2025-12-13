@@ -111,6 +111,8 @@ interface GameRoundProps {
   startTime: number; // When the round actually started (server time)
   onAnswer: (correct: boolean, guess?: string) => void;
   gameStatus: GameStatus;
+  isHost: boolean;
+  onExit: () => void;
 }
 
 export const GameRound: React.FC<GameRoundProps> = ({ 
@@ -120,7 +122,9 @@ export const GameRound: React.FC<GameRoundProps> = ({
   duration,
   startTime,
   onAnswer,
-  gameStatus
+  gameStatus,
+  isHost,
+  onExit
 }) => {
   const [inputVal, setInputVal] = useState('');
   const [localState, setLocalState] = useState<'playing' | 'success' | 'failed'>('playing');
@@ -221,8 +225,19 @@ export const GameRound: React.FC<GameRoundProps> = ({
             <div className="bg-black/30 px-3 py-1 md:px-4 md:py-2 rounded-full font-bold text-sm md:text-lg border border-white/10">
              Question #{questionIndex + 1}
             </div>
-            <div className="text-xs md:text-sm font-bold opacity-60 uppercase tracking-widest">
-                {question.category || 'General'}
+            <div className="flex items-center gap-3">
+                <div className="text-xs md:text-sm font-bold opacity-60 uppercase tracking-widest">
+                    {question.category || 'General'}
+                </div>
+                {isHost && (
+                    <button
+                        onClick={onExit}
+                        className="bg-red-500/80 hover:bg-red-600 text-white px-3 py-1.5 md:px-4 md:py-2 rounded-lg font-bold text-xs md:text-sm transition-all duration-200 hover:scale-105 active:scale-95 shadow-lg border border-red-400/50"
+                        title="End Game"
+                    >
+                        Exit Game
+                    </button>
+                )}
             </div>
         </div>
 
