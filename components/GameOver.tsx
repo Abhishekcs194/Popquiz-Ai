@@ -1,16 +1,17 @@
-import React, { useEffect, useRef } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { Button } from './Button';
 import { Player } from '../types';
 import { Scoreboard } from './Scoreboard';
 
 interface GameOverProps {
   players: Player[];
-  onRestart: () => void; // Available if Host
+  onRestart: () => void; // Auto-called after 5 seconds
   onHome: () => void;
   isHost: boolean;
 }
 
 export const GameOver: React.FC<GameOverProps> = ({ players, onRestart, onHome, isHost }) => {
+    const [countdown, setCountdown] = useState(5);
     const canvasRef = useRef<HTMLCanvasElement>(null);
 
     // Simple confetti implementation
@@ -63,6 +64,22 @@ export const GameOver: React.FC<GameOverProps> = ({ players, onRestart, onHome, 
         return () => cancelAnimationFrame(animationId);
     }, []);
 
+    // Auto-return to lobby after 5 seconds
+    useEffect(() => {
+        const timer = setInterval(() => {
+            setCountdown((prev) => {
+                if (prev <= 1) {
+                    clearInterval(timer);
+                    onRestart();
+                    return 0;
+                }
+                return prev - 1;
+            });
+        }, 1000);
+
+        return () => clearInterval(timer);
+    }, [onRestart]);
+
     const winner = [...players].sort((a,b) => b.score - a.score)[0];
 
   return (
@@ -80,26 +97,20 @@ export const GameOver: React.FC<GameOverProps> = ({ players, onRestart, onHome, 
             <div className="text-white/60 font-bold uppercase tracking-widest text-sm md:text-base">Score: {winner?.score}</div>
         </div>
 
-        <div className="grid md:grid-cols-2 gap-6 md:gap-8 mb-8 text-left">
-            <div>
-                 <h3 className="text-xs md:text-sm font-bold uppercase tracking-widest text-white/50 mb-4 text-center">Final Standings</h3>
-                 <Scoreboard players={players} compact />
-            </div>
-            
-            <div className="flex flex-col justify-center space-y-3 md:space-y-4">
-                {isHost && (
-                    <Button onClick={onRestart} fullWidth variant="success" size="lg" className="animate-pulse shadow-xl">
-                        Return to Lobby
-                    </Button>
-                )}
-                <Button onClick={onHome} fullWidth variant="secondary">
-                    Back to Home
-                </Button>
-                {!isHost && (
-                    <div className="text-center text-sm text-white/40 mt-4">
-                        Waiting for host to restart...
-                    </div>
-                )}
+        <div className="mb-8">
+            <h3 className="text-xs md:text-sm font-bold uppercase tracking-widest text-white/50 mb-4 text-center">Final Standings</h3>
+            <Scoreboard players={players} compact />
+        </div>
+
+        {/* Auto-return timer */}
+        <div className="mt-6 pt-6 border-t border-white/20">
+            <div className="text-center">
+                <div className="text-lg md:text-2xl font-bold text-white/80 mb-2">
+                    Returning to lobby in...
+                </div>
+                <div className="text-4xl md:text-6xl font-black text-yellow-400 animate-pulse">
+                    {countdown}
+                </div>
             </div>
         </div>
 

@@ -19,6 +19,10 @@ RULES:
      - "Iron Man" -> imageType: "character"
      - "The Starry Night" -> imageType: "art"
      - "Titanic" -> imageType: "movie"
+   - **IMPORTANT**: The topic context is used to disambiguate images. For example:
+     - If topic is "food" and answer is "spaghetti", fetch an image of spaghetti (the food), NOT a movie poster
+     - If topic is "animals" and answer is "tiger", fetch an image of a tiger (the animal), NOT a movie character
+     - Always consider the topic when the answer could have multiple meanings
 
 3. **Ratio**: ~1% 'image' questions, ~99% 'text' questions.
 
@@ -91,15 +95,18 @@ export const generateQuestions = async (topic: string, count: number, existingAn
     let questions = JSON.parse(text) as Question[];
     
     // --- Post-Processing: Fetch Images using Smart Router ---
-    const resolvedQuestions = await Promise.all(questions.map(async (q): Promise<Question> => {
+    console.log(`[GeminiService] 📸 Processing ${questions.filter(q => q.type === 'image').length} image questions for topic: "${topic}"`);
+    const resolvedQuestions = await Promise.all(questions.map(async (q, index): Promise<Question> => {
         if (q.type === 'image') {
+            console.log(`[GeminiService] 📸 [${index + 1}/${questions.length}] Fetching image for answer: "${q.answer}", imageType: "${q.imageType}", topic: "${topic}"`);
             // Use the answer to fetch the image (the image should show what the answer is)
             const realUrl = await getSmartImage(q.answer, q.imageType, topic);
             
             if (realUrl) {
+                console.log(`[GeminiService] ✅ [${index + 1}/${questions.length}] Image found for "${q.answer}": ${realUrl.substring(0, 80)}...`);
                 return { ...q, content: realUrl };
             } else {
-                console.warn(`[GeminiService] No image found for answer '${q.answer}'. Using placeholder.`);
+                console.error(`[GeminiService] ❌ [${index + 1}/${questions.length}] No image found for answer '${q.answer}' (imageType: ${q.imageType}, topic: ${topic}). Using placeholder.`);
                 return { 
                     ...q, 
                     content: "https://placehold.co/600x400/202020/FFFFFF?text=Image+Unavailable",

@@ -8,6 +8,7 @@ import { LandingPage } from './components/LandingPage';
 import { Lobby } from './components/Lobby';
 import { GameRound } from './components/GameRound';
 import { GameOver } from './components/GameOver';
+import { Navbar } from './components/Navbar';
 
 // --- Default State ---
 const INITIAL_SETTINGS: GameSettings = {
@@ -20,6 +21,12 @@ const INITIAL_SETTINGS: GameSettings = {
 const App: React.FC = () => {
   // Local Player Info
   const [localPlayerId] = useState(() => Math.random().toString(36).substring(2, 9));
+  const [localPlayerName, setLocalPlayerName] = useState(() => {
+    return localStorage.getItem('popquiz-player-name') || 'Player';
+  });
+  const [localPlayerAvatar, setLocalPlayerAvatar] = useState(() => {
+    return localStorage.getItem('popquiz-player-avatar') || '👤';
+  });
   
   // Refs
   const pendingJoinRef = useRef<{name: string, avatar: string} | null>(null);
@@ -52,12 +59,13 @@ const App: React.FC = () => {
 
   (window as any).localPlayerId = localPlayerId;
 
-  // Initial URL Check
+  // Initial URL Check - Only set roomId, don't connect yet
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
     const room = params.get('room');
     if (room) {
-      updateState({ roomId: room });
+      // Set roomId but keep status as 'landing' so user can enter name
+      updateState({ roomId: room, status: 'landing' });
     }
   }, []);
 
@@ -80,38 +88,57 @@ const App: React.FC = () => {
 
   // --- Networking & Logic ---
 
-  // 1. Connection Lifecycle
+  // 1. Connection Lifecycle - Only connect when in lobby, not on landing
   useEffect(() => {
-    if (gameState.roomId) {
-      console.log(`[App] Connecting to room: ${gameState.roomId}`);
+    // Only connect if we have a roomId AND we're not on the landing page
+    // This prevents auto-connecting when opening a share link
+    if (gameState.roomId && gameState.status !== 'landing') {
       multiplayer.connect(gameState.roomId, (msg) => handleNetworkMessage(msg));
       
-      // If we're the host, broadcast state when connection is ready
-      const checkAndBroadcast = () => {
+      // If we're the host, broadcast state periodically to help guests connect
+      const broadcastState = () => {
         const current = gameStateRef.current;
         if (isLocalHost(current.players) && current.players.length > 0) {
-          const connectionState = multiplayer.getConnectionState();
-          if (connectionState.isConnected || connectionState.peerCount > 0) {
-            console.log(`[Host] Broadcasting initial state to ${connectionState.peerCount} peers`);
-            multiplayer.send({ 
-              type: 'STATE_UPDATE', 
-              payload: current 
-            });
-          } else {
-            // Retry after a short delay
-            setTimeout(checkAndBroadcast, 1000);
+          multiplayer.send({ 
+            type: 'STATE_UPDATE', 
+            payload: current,
+            senderId: localPlayerId
+          });
+        }
+      };
+      
+      // Listen for peer connections to broadcast state immediately
+      (window as any).__onPeerConnected = (peerId: string) => {
+        const current = gameStateRef.current;
+        if (isLocalHost(current.players) && current.players.length > 0) {
+          // Send state update multiple times to ensure delivery
+          for (let i = 0; i < 3; i++) {
+            setTimeout(() => {
+              multiplayer.send({ 
+                type: 'STATE_UPDATE', 
+                payload: current,
+                senderId: localPlayerId
+              });
+            }, i * 200);
           }
         }
       };
       
-      // Wait a bit for connection to establish, then check and broadcast
-      setTimeout(checkAndBroadcast, 2000);
-    }
-    return () => {
-      console.log(`[App] Disconnecting from room`);
+      // Broadcast state immediately and then periodically
+      setTimeout(broadcastState, 500); // Start after 500ms
+      const broadcastInterval = setInterval(broadcastState, 2000); // Then every 2 seconds
+      
+      // Cleanup: only clear interval, don't disconnect (let disconnect happen only when roomId changes or status goes to landing)
+      return () => {
+        clearInterval(broadcastInterval);
+        // Don't disconnect here - let the roomId/status change handle disconnection
+      };
+    } else if (gameState.status === 'landing' || !gameState.roomId) {
+      // Only disconnect if we're explicitly on landing or have no roomId
       multiplayer.disconnect();
-    };
-  }, [gameState.roomId]);
+    }
+    // No cleanup needed if we're staying in the same room with same status
+  }, [gameState.roomId, gameState.status]);
 
   // 2. Join Request Retry Loop (with connection readiness check)
   useEffect(() => {
@@ -120,40 +147,54 @@ const App: React.FC = () => {
     let attemptCount = 0;
     const maxAttempts = 20; // 30 seconds max (20 * 1.5s)
 
-    if (gameState.status === 'lobby' && gameState.players.length === 0 && !isLocalHost(gameState.players)) {
+    // Check if we're a guest (not host) and we're not in the players list yet
+    const isGuest = !isLocalHost(gameState.players);
+    const isInPlayersList = gameState.players.some(p => p.id === localPlayerId);
+    const shouldSendJoinRequest = gameState.status === 'lobby' && isGuest && !isInPlayersList && pendingJoinRef.current;
+
+    if (shouldSendJoinRequest) {
       const tryJoin = () => {
          attemptCount++;
          const connectionState = multiplayer.getConnectionState();
          
-         if (pendingJoinRef.current) {
-             // Only send if connection is ready or we're the host (first peer)
-             if (connectionState.isConnected || connectionState.peerCount === 0) {
-                 console.log(`[App] Broadcasting JOIN_REQUEST to mesh... (attempt ${attemptCount})`);
-                 const sent = multiplayer.send({
-                     type: 'JOIN_REQUEST',
-                     payload: pendingJoinRef.current,
-                     senderId: localPlayerId
-                 });
-                 
-                 if (!sent) {
-                     console.warn(`[App] Failed to send JOIN_REQUEST, connection not ready`);
-                 }
-             } else {
-                 console.log(`[App] Waiting for connection... (${connectionState.peerCount} peers)`);
-             }
-         }
+        if (pendingJoinRef.current) {
+            // Always try to send JOIN_REQUEST - P2P needs messages to establish connection
+            // Trystero will queue messages and deliver when peers connect
+            try {
+              const sent = multiplayer.send({
+                  type: 'JOIN_REQUEST',
+                  payload: pendingJoinRef.current,
+                  senderId: localPlayerId
+              });
+              
+              if (!sent) {
+                console.warn(`[App] Failed to send JOIN_REQUEST, will retry`);
+              }
+            } catch (error) {
+              console.error(`[App] Error sending JOIN_REQUEST:`, error);
+            }
+        }
+
+        // Stop retrying if we're now in the players list
+        const currentIsInPlayersList = gameStateRef.current.players.some(p => p.id === localPlayerId);
+        if (currentIsInPlayersList) {
+            clearInterval(interval);
+            return;
+        }
 
          // Stop retrying after max attempts
          if (attemptCount >= maxAttempts) {
              console.warn(`[App] Max join attempts reached. Stopping retry.`);
              clearInterval(interval);
+             // Show error message to user
+             console.error(`[App] Failed to connect to room after ${maxAttempts} attempts. Please check your network connection.`);
          }
       };
       
-      // Start immediately
-      tryJoin();
-      // Then retry every 1.5 seconds
-      interval = window.setInterval(tryJoin, 1500);
+      // Start after a delay to let Trystero initialize
+      setTimeout(tryJoin, 1000);
+      // Then retry every 2 seconds (give P2P more time between attempts)
+      interval = window.setInterval(tryJoin, 2000);
       
       // Set overall timeout
       timeout = window.setTimeout(() => {
@@ -165,7 +206,7 @@ const App: React.FC = () => {
       if (interval) clearInterval(interval);
       if (timeout) clearTimeout(timeout);
     };
-  }, [gameState.status, gameState.players.length, gameState.roomId, localPlayerId]);
+  }, [gameState.status, gameState.players, gameState.roomId, localPlayerId]);
 
   // 3. Handle Incoming Messages
   const handleNetworkMessage = (msg: NetworkMessage) => {
@@ -204,33 +245,54 @@ const App: React.FC = () => {
           };
           
           const playerExists = current.players.some(p => p.id === newPlayer.id);
-          let nextState = current;
 
           if (!playerExists) {
-             console.log(`[Host] Accepting new player: ${newPlayer.name} (${newPlayer.id})`);
-             nextState = updateState({ 
+             updateState({ 
                  players: [...current.players, newPlayer] 
              });
              
-             // Send state update with retry logic
-             const sendStateUpdate = () => {
-               const sent = multiplayer.send({ type: 'STATE_UPDATE', payload: nextState });
-               if (!sent) {
-                 console.warn('[Host] Failed to send STATE_UPDATE, retrying...');
-                 setTimeout(sendStateUpdate, 500);
+             // Send state update immediately and with retries to ensure it reaches the joining player
+             const sendStateUpdate = (retryCount = 0) => {
+               const stateToSend = gameStateRef.current;
+               const sent = multiplayer.send({ 
+                 type: 'STATE_UPDATE', 
+                 payload: stateToSend,
+                 senderId: localPlayerId
+               });
+               
+               if (!sent && retryCount < 5) {
+                 console.warn(`[Host] Failed to send STATE_UPDATE, retrying... (${retryCount + 1}/5)`);
+                 setTimeout(() => sendStateUpdate(retryCount + 1), 500);
+               } else if (sent) {
+                 // Send a second time after a short delay to ensure delivery
+                 setTimeout(() => {
+                   const latestState = gameStateRef.current;
+                   multiplayer.send({ 
+                     type: 'STATE_UPDATE', 
+                     payload: latestState,
+                     senderId: localPlayerId
+                   });
+                 }, 1000);
                }
              };
+             
              sendStateUpdate();
           }
         }
         break;
 
       case 'STATE_UPDATE':
-        // Only accept state updates if we're not the host or if we have no players (initial sync)
-        if (!isLocalHost(current.players) || current.players.length === 0) {
+        // Accept state updates if:
+        // 1. We're not the host, OR
+        // 2. We have no players (initial sync), OR
+        // 3. We're waiting to join (status is lobby and no players)
+        const shouldAcceptUpdate = !isLocalHost(current.players) || 
+                                   current.players.length === 0 ||
+                                   (current.status === 'lobby' && current.players.length === 0);
+        
+        if (shouldAcceptUpdate) {
             // Validate payload structure
             if (msg.payload && typeof msg.payload === 'object') {
-                console.log('[App] Received STATE_UPDATE');
                 updateState(msg.payload);
             } else {
                 console.warn('[App] Invalid STATE_UPDATE payload');
@@ -245,6 +307,32 @@ const App: React.FC = () => {
             handlePlayerAction(msg.senderId, msg.payload.action, msg.payload.data);
           } else {
             console.warn('[App] Invalid PLAYER_ACTION payload:', msg.payload);
+          }
+        }
+        break;
+
+      case 'CHAT_MESSAGE':
+        // Chat messages are handled by ChatSheet component
+        // Broadcast to all players (including sender for consistency)
+        if (msg.payload) {
+          // Trigger chat callback if exists
+          if ((window as any).__chatCallback) {
+            (window as any).__chatCallback(msg);
+          }
+        }
+        break;
+
+      case 'PLAYER_UPDATE':
+        // Handle player profile updates
+        if (isLocalHost(current.players)) {
+          const playerId = msg.senderId;
+          const { name, avatar } = msg.payload || {};
+          if (playerId && name && avatar) {
+            const newPlayers = current.players.map(p =>
+              p.id === playerId ? { ...p, name, avatar } : p
+            );
+            const newState = updateState({ players: newPlayers });
+            broadcast(newState);
           }
         }
         break;
@@ -446,6 +534,11 @@ const App: React.FC = () => {
   // --- User Interaction Handlers ---
 
   const handleCreateGame = (name: string, avatar: string) => {
+    setLocalPlayerName(name);
+    setLocalPlayerAvatar(avatar);
+    localStorage.setItem('popquiz-player-name', name);
+    localStorage.setItem('popquiz-player-avatar', avatar);
+
     const roomId = Math.random().toString(36).substring(2, 6).toUpperCase();
     const hostPlayer: Player = {
         id: localPlayerId,
@@ -471,12 +564,52 @@ const App: React.FC = () => {
   };
 
   const handleJoinGame = (name: string, avatar: string, code: string) => {
+    if (!name.trim()) {
+      console.warn('[App] Cannot join: name is required');
+      return;
+    }
+
+    setLocalPlayerName(name);
+    setLocalPlayerAvatar(avatar);
+    localStorage.setItem('popquiz-player-name', name);
+    localStorage.setItem('popquiz-player-avatar', avatar);
+    
+    // Set pending join info BEFORE connecting
     pendingJoinRef.current = { name, avatar };
+    
+    // Update state to lobby and connect
     updateState({ 
         roomId: code, 
         status: 'lobby',
         players: [] 
     });
+  };
+
+  const handleUpdatePlayer = (name: string, avatar: string) => {
+    setLocalPlayerName(name);
+    setLocalPlayerAvatar(avatar);
+    localStorage.setItem('popquiz-player-name', name);
+    localStorage.setItem('popquiz-player-avatar', avatar);
+
+    // Update in game state if player exists
+    const current = gameStateRef.current;
+    const playerIndex = current.players.findIndex(p => p.id === localPlayerId);
+    if (playerIndex !== -1) {
+      const newPlayers = [...current.players];
+      newPlayers[playerIndex] = { ...newPlayers[playerIndex], name, avatar };
+      const newState = updateState({ players: newPlayers });
+      
+      // Broadcast player update
+      if (isLocalHost(current.players)) {
+        broadcast(newState);
+      } else {
+        multiplayer.send({
+          type: 'PLAYER_UPDATE',
+          payload: { name, avatar },
+          senderId: localPlayerId
+        });
+      }
+    }
   };
 
   const handleUpdateSettings = (newSettings: GameSettings) => {
@@ -486,16 +619,31 @@ const App: React.FC = () => {
   };
 
   const handleToggleReady = () => {
+    // Optimistically update local state immediately for instant UI feedback
+    const current = gameStateRef.current;
+    const localPlayer = current.players.find(p => p.id === localPlayerId);
+    
+    if (!localPlayer) return;
+    
+    // Update state immediately (optimistic update) for instant visual feedback
+    const newPlayers = current.players.map(p => 
+      p.id === localPlayerId ? { ...p, isReady: !p.isReady } : p
+    );
+    updateState({ players: newPlayers });
+    
+    // Then sync with network
     if (isLocalHost(gameState.players)) {
-        // Host modifies local state directly
-        handlePlayerAction(localPlayerId, 'READY_TOGGLE', null);
-        return;
+        // Host broadcasts updated state to all players
+        const updatedState = gameStateRef.current;
+        broadcast(updatedState);
+    } else {
+        // Guest sends action to host (host will process and broadcast back)
+        multiplayer.send({
+            type: 'PLAYER_ACTION',
+            payload: { action: 'READY_TOGGLE' },
+            senderId: localPlayerId
+        });
     }
-    multiplayer.send({
-        type: 'PLAYER_ACTION',
-        payload: { action: 'READY_TOGGLE' },
-        senderId: localPlayerId
-    });
   };
 
   const handleStartGame = async () => {
@@ -588,6 +736,9 @@ const App: React.FC = () => {
     window.location.href = window.location.origin;
   };
 
+  // Get local player object
+  const localPlayer = gameState.players.find(p => p.id === localPlayerId) || null;
+
   const handleExitGame = () => {
     if (!isLocalHost(gameState.players)) return;
     // End the game and show game over screen with current scores
@@ -599,13 +750,32 @@ const App: React.FC = () => {
   // --- Render ---
 
   return (
-    <div className="min-h-screen w-full bg-gradient-to-br from-indigo-900 via-purple-900 to-fuchsia-900 text-white flex flex-col font-fredoka">
+    <div className="min-h-screen w-full text-white flex flex-col font-fredoka">
       <div className="fixed inset-0 overflow-hidden pointer-events-none">
         <div className="absolute top-10 left-10 w-32 h-32 bg-purple-500 rounded-full mix-blend-multiply filter blur-3xl opacity-20 animate-pulse"></div>
         <div className="absolute bottom-10 right-10 w-64 h-64 bg-blue-500 rounded-full mix-blend-multiply filter blur-3xl opacity-20 animate-pulse" style={{ animationDelay: '1s' }}></div>
       </div>
 
-      <div className="relative z-10 flex-1 flex flex-col p-4 md:p-6">
+      {/* Navbar - Show on all pages except landing */}
+      {gameState.status !== 'landing' && (
+        <Navbar
+          onHome={handleHome}
+          localPlayer={localPlayer || {
+            id: localPlayerId,
+            name: localPlayerName,
+            avatar: localPlayerAvatar,
+            score: 0,
+            streak: 0,
+            isHost: false,
+            isReady: false,
+            hasAnsweredRound: false
+          }}
+          onUpdatePlayer={handleUpdatePlayer}
+          roomId={gameState.roomId || undefined}
+        />
+      )}
+
+      <div className="relative z-10 flex-1 flex flex-col p-4 md:p-6 pt-20 md:pt-24">
         
         {gameState.status === 'landing' && (
              <div className="flex-1 flex items-center justify-center">

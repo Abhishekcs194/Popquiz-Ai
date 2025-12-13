@@ -6,6 +6,8 @@ export type MessageType =
   | 'STATE_UPDATE' 
   | 'PLAYER_ACTION' 
   | 'HOST_ACTION'
+  | 'CHAT_MESSAGE'
+  | 'PLAYER_UPDATE'
   | 'PING'
   | 'PONG';
 
@@ -26,14 +28,17 @@ class MultiplayerService {
   private reconnectAttempts: number = 0;
   private maxReconnectAttempts: number = 5;
   private currentRoomId: string | null = null;
+  private peerCheckInterval: number | null = null;
 
   connect(roomId: string, onMessage: (msg: NetworkMessage) => void) {
+    // Only reconnect if roomId actually changed
     if (this.room && this.currentRoomId === roomId) {
-      console.log(`[Multiplayer] Already connected to room: ${roomId}`);
+      this.onMessageCallback = onMessage;
       return;
     }
 
-    if (this.room) {
+    // Disconnect from previous room only if roomId changed
+    if (this.room && this.currentRoomId !== roomId) {
       this.disconnect();
     }
 
@@ -42,20 +47,19 @@ class MultiplayerService {
     this.peerIds.clear();
     this.reconnectAttempts = 0;
     this.onMessageCallback = onMessage;
-
-    console.log(`[Multiplayer] Joining room: ${roomId}`);
     
     try {
       // appId ensures we don't collide with other trystero apps
+      // Trystero uses IPFS by default for signaling
       this.room = joinRoom({ appId: 'popquiz-ai-v1' }, roomId);
       
-      // Set connection timeout (10 seconds)
+      // Set connection timeout (20 seconds - P2P WebRTC can take time to establish)
       this.connectionTimeout = window.setTimeout(() => {
-        if (!this.isConnected) {
-          console.warn(`[Multiplayer] Connection timeout for room: ${roomId}`);
-          this.handleConnectionFailure(roomId, onMessage);
+        if (!this.isConnected || this.peerIds.size === 0) {
+          console.warn(`[Multiplayer] Connection timeout for room: ${roomId} (connected: ${this.isConnected}, peers: ${this.peerIds.size})`);
+          console.warn(`[Multiplayer] P2P connection may be blocked by firewall/NAT. Messages may still work if Trystero can establish connection.`);
         }
-      }, 10000);
+      }, 20000);
 
       // 'game' is the "topic" for our messages
       const [send, get] = this.room.makeAction('game');
@@ -69,9 +73,14 @@ class MultiplayerService {
           return;
         }
 
-        // Track peer
+        // Track peer - receiving ANY message means we're connected
         if (peerId) {
           this.peerIds.add(peerId);
+          this.isConnected = true;
+          if (this.connectionTimeout) {
+            clearTimeout(this.connectionTimeout);
+            this.connectionTimeout = null;
+          }
         }
 
         // Handle ping/pong for connection health
@@ -81,7 +90,6 @@ class MultiplayerService {
         }
 
         if (data.type === 'PONG') {
-          // Connection is healthy
           this.isConnected = true;
           if (this.connectionTimeout) {
             clearTimeout(this.connectionTimeout);
@@ -97,7 +105,6 @@ class MultiplayerService {
       });
 
       this.room.onPeerJoin((peerId: string) => {
-        console.log(`[Multiplayer] Peer joined: ${peerId}`);
         this.peerIds.add(peerId);
         this.isConnected = true;
         
@@ -107,27 +114,75 @@ class MultiplayerService {
           this.connectionTimeout = null;
         }
 
+        // Notify that connection is ready (for App.tsx to broadcast state)
+        if (this.onMessageCallback) {
+          setTimeout(() => {
+            if ((window as any).__onPeerConnected) {
+              (window as any).__onPeerConnected(peerId);
+            }
+          }, 100);
+        }
+
         // Send ping to verify connection
         setTimeout(() => {
           this.send({ type: 'PING', payload: {}, timestamp: Date.now() });
         }, 500);
       });
+
+      // Actively check for peers using Trystero's getPeers() method
+      this.peerCheckInterval = window.setInterval(() => {
+        try {
+          let peers: string[] = [];
+          
+          if (typeof this.room.getPeers === 'function') {
+            peers = this.room.getPeers();
+          } else if (this.room.peers && Array.isArray(this.room.peers)) {
+            peers = this.room.peers;
+          } else if (this.room._peers && Array.isArray(this.room._peers)) {
+            peers = this.room._peers;
+          }
+          
+          if (peers && peers.length > 0) {
+            peers.forEach((peerId: string) => {
+              if (peerId && !this.peerIds.has(peerId)) {
+                this.peerIds.add(peerId);
+                this.isConnected = true;
+                
+                if (this.connectionTimeout) {
+                  clearTimeout(this.connectionTimeout);
+                  this.connectionTimeout = null;
+                }
+                
+                // Trigger peer connected callback
+                if ((window as any).__onPeerConnected) {
+                  (window as any).__onPeerConnected(peerId);
+                }
+              }
+            });
+          }
+        } catch (error) {
+          // getPeers might not be available or accessible
+        }
+      }, 2000);
       
       this.room.onPeerLeave((peerId: string) => {
-        console.log(`[Multiplayer] Peer left: ${peerId}`);
         this.peerIds.delete(peerId);
       });
 
-      // Mark as connected after a short delay (allows time for peer discovery)
+      // Mark as connected after a delay - but only if we're the first peer (host)
       setTimeout(() => {
         if (!this.isConnected && this.peerIds.size === 0) {
-          // If we're the first peer (host), mark as connected anyway
           this.isConnected = true;
           if (this.connectionTimeout) {
             clearTimeout(this.connectionTimeout);
             this.connectionTimeout = null;
           }
-          console.log(`[Multiplayer] Connected as first peer in room: ${roomId}`);
+        } else if (this.peerIds.size > 0) {
+          this.isConnected = true;
+          if (this.connectionTimeout) {
+            clearTimeout(this.connectionTimeout);
+            this.connectionTimeout = null;
+          }
         }
       }, 2000);
 
@@ -147,8 +202,6 @@ class MultiplayerService {
     
     if (this.reconnectAttempts < this.maxReconnectAttempts) {
       const delay = Math.min(1000 * Math.pow(2, this.reconnectAttempts), 10000); // Exponential backoff, max 10s
-      console.log(`[Multiplayer] Reconnecting in ${delay}ms (attempt ${this.reconnectAttempts}/${this.maxReconnectAttempts})...`);
-      
       setTimeout(() => {
         this.disconnect();
         this.connect(roomId, onMessage);
@@ -161,23 +214,29 @@ class MultiplayerService {
 
   send(msg: NetworkMessage) {
     if (!this.sendAction) {
-      console.warn('[Multiplayer] Cannot send message: not connected');
+      console.warn('[Multiplayer] Cannot send message: sendAction not available');
       return false;
     }
 
-    if (!this.isConnected && msg.type !== 'PING' && msg.type !== 'PONG') {
-      console.warn('[Multiplayer] Connection not ready, queuing message...');
-      // Retry sending after a short delay
-      setTimeout(() => {
-        if (this.sendAction) {
-          this.sendAction({ ...msg, timestamp: Date.now() });
-        }
-      }, 500);
-      return false;
+    // For P2P, always try to send - Trystero queues messages and delivers when peers connect
+    // This is critical: messages help establish the connection
+    const isCriticalMessage = msg.type === 'JOIN_REQUEST' || msg.type === 'STATE_UPDATE' || msg.type === 'PLAYER_ACTION';
+    
+    // Log connection state for debugging
+    if (!this.isConnected && !isCriticalMessage && msg.type !== 'PING' && msg.type !== 'PONG') {
+      console.warn(`[Multiplayer] Connection not ready, but sending anyway (message will queue if needed)`);
     }
 
     try {
-      this.sendAction({ ...msg, timestamp: Date.now() });
+      // Always try to send - Trystero will queue messages and deliver when peers connect
+      const messageToSend = { ...msg, timestamp: Date.now() };
+      this.sendAction(messageToSend);
+      
+      // If this is a critical message and we have no peers, log a warning
+      if (isCriticalMessage && this.peerIds.size === 0 && !this.isConnected) {
+        console.warn(`[Multiplayer] Sending ${msg.type} but no peers detected yet - message may be queued`);
+      }
+      
       return true;
     } catch (error) {
       console.error('[Multiplayer] Error sending message:', error);
@@ -191,8 +250,12 @@ class MultiplayerService {
       this.connectionTimeout = null;
     }
 
+    if (this.peerCheckInterval) {
+      clearInterval(this.peerCheckInterval);
+      this.peerCheckInterval = null;
+    }
+
     if (this.room) {
-      console.log('[Multiplayer] Leaving room');
       try {
         this.room.leave();
       } catch (error) {

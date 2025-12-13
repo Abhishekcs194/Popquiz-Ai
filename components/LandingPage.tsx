@@ -9,15 +9,27 @@ interface LandingPageProps {
 }
 
 export const LandingPage: React.FC<LandingPageProps> = ({ onCreate, onJoin, initialCode = '' }) => {
-  const [name, setName] = useState('');
-  const [avatar, setAvatar] = useState(AVATARS[0]);
+  // Try to load saved name/avatar from localStorage
+  const [name, setName] = useState(() => {
+    const saved = localStorage.getItem('popquiz-player-name');
+    return saved || '';
+  });
+  const [avatar, setAvatar] = useState(() => {
+    const saved = localStorage.getItem('popquiz-player-avatar');
+    return saved || AVATARS[0];
+  });
   const [roomCode, setRoomCode] = useState(initialCode);
-  const [mode, setMode] = useState<'menu' | 'join'>('menu');
+  const [mode, setMode] = useState<'menu' | 'join'>(initialCode ? 'join' : 'menu');
 
   useEffect(() => {
     if (initialCode) {
         setRoomCode(initialCode);
         setMode('join');
+        // Auto-focus name input if coming from URL
+        setTimeout(() => {
+          const nameInput = document.querySelector('input[placeholder="Enter nickname"]') as HTMLInputElement;
+          if (nameInput) nameInput.focus();
+        }, 100);
     }
   }, [initialCode]);
 
