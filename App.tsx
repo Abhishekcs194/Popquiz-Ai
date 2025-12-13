@@ -175,8 +175,20 @@ const App: React.FC = () => {
     else if (action === 'ANSWER_CORRECT') {
         const player = newPlayers.find(p => p.id === playerId);
         if (player && !player.hasAnsweredRound) {
+            // Calculate time taken to answer correctly (in seconds, to 3 decimal places)
+            const now = Date.now();
+            const elapsed = (now - current.roundStartTime) / 1000;
+            const answerTime = Math.round(elapsed * 1000) / 1000; // Round to 3 decimal places
+            
+            // data is the answer they typed (correct answer)
             newPlayers = newPlayers.map(p => 
-                p.id === playerId ? { ...p, score: p.score + 10, hasAnsweredRound: true } : p
+                p.id === playerId ? { 
+                    ...p, 
+                    score: p.score + 10, 
+                    hasAnsweredRound: true, 
+                    answerTime,
+                    finalAnswer: data || undefined // Store what they typed
+                } : p
             );
             stateChanged = true;
             playSound.correct();
@@ -185,7 +197,11 @@ const App: React.FC = () => {
     else if (action === 'ANSWER_WRONG') {
         // data is the wrong guess string
         newPlayers = newPlayers.map(p => 
-            p.id === playerId ? { ...p, lastWrongGuess: data } : p
+            p.id === playerId ? { 
+                ...p, 
+                lastWrongGuess: data,
+                finalAnswer: data // Store what they typed
+            } : p
         );
         stateChanged = true;
     }
@@ -297,11 +313,13 @@ const App: React.FC = () => {
           broadcast(newState);
       } else {
           // Reset for next question
-          // Also clear lastWrongGuess
+          // Also clear lastWrongGuess, answerTime, and finalAnswer
           const resetPlayers = current.players.map(p => ({
               ...p, 
               hasAnsweredRound: false,
-              lastWrongGuess: undefined 
+              lastWrongGuess: undefined,
+              answerTime: undefined,
+              finalAnswer: undefined
           }));
           
           const newState = updateState({
@@ -411,7 +429,9 @@ const App: React.FC = () => {
             ...p, 
             score: 0, 
             hasAnsweredRound: false,
-            lastWrongGuess: undefined
+            lastWrongGuess: undefined,
+            answerTime: undefined,
+            finalAnswer: undefined
         }))
     });
     broadcast(newState);
@@ -419,12 +439,13 @@ const App: React.FC = () => {
 
   const handleAnswer = (correct: boolean, guess?: string) => {
     if (correct) {
+        // Pass the guess (what they typed) even for correct answers
         if (isLocalHost(gameState.players)) {
-            handlePlayerAction(localPlayerId, 'ANSWER_CORRECT', null);
+            handlePlayerAction(localPlayerId, 'ANSWER_CORRECT', guess || '');
         } else {
             multiplayer.send({
                 type: 'PLAYER_ACTION',
-                payload: { action: 'ANSWER_CORRECT' },
+                payload: { action: 'ANSWER_CORRECT', data: guess || '' },
                 senderId: localPlayerId
             });
         }
@@ -451,7 +472,9 @@ const App: React.FC = () => {
             score: 0, 
             isReady: false, 
             hasAnsweredRound: false,
-            lastWrongGuess: undefined
+            lastWrongGuess: undefined,
+            answerTime: undefined,
+            finalAnswer: undefined
         }))
     });
     broadcast(newState);

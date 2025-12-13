@@ -21,6 +21,8 @@ export interface Player {
   isReady: boolean;
   hasAnsweredRound: boolean; // Did they answer the current question correctly?
   lastWrongGuess?: string; // The text of their last wrong answer
+  answerTime?: number; // Time taken to answer correctly (in seconds, to 3 decimal places)
+  finalAnswer?: string; // What the player typed (correct or wrong) - shown after round ends
   isBot?: boolean;
 }
 

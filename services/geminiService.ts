@@ -25,7 +25,11 @@ RULES:
 4. **Answers**: 
    - SHORT (1-3 words).
    - **Unique**: No duplicates.
-   - **Accepted Answers**: Provide aliases.
+   - **Accepted Answers**: Provide aliases, abbreviations, and common variations.
+     - Include acronyms (e.g., "USA" for "United States of America")
+     - Include initialisms (e.g., "FBI" for "Federal Bureau of Investigation")
+     - Include common nicknames and shortened forms
+     - Include alternative spellings when applicable
 
 5. **Question Text**:
    - For image questions, include 'questionText' (e.g. "Name this character", "Which game is this?").

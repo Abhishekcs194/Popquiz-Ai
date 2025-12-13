@@ -48,6 +48,11 @@ export const Scoreboard: React.FC<ScoreboardProps> = ({ players, compact = false
                     {isWinner && !compact && (
                         <div className="text-xs font-bold uppercase tracking-wider opacity-90 flex items-center gap-1">
                              ✓ Correct
+                             {p.answerTime !== undefined && (
+                                 <span className="ml-1 text-[10px] opacity-75">
+                                     ({p.answerTime.toFixed(3)}s)
+                                 </span>
+                             )}
                         </div>
                     )}
                     
