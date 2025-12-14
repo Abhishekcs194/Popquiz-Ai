@@ -59,8 +59,11 @@ export const ChatSheet: React.FC<ChatSheetProps> = ({ onClose, localPlayerId, lo
     if (!query.trim()) return;
     
     try {
-      // Using Tenor API (you'll need to add your API key)
-      const API_KEY = 'AIzaSyAyimkuYQYF_FXVALexPuGQctUWRURdCYQ'; // Public demo key
+      const API_KEY = (process.env as any).TENOR_API_KEY;
+      if (!API_KEY) {
+        console.error('TENOR_API_KEY is not set');
+        return;
+      }
       const response = await fetch(
         `https://tenor.googleapis.com/v2/search?q=${encodeURIComponent(query)}&key=${API_KEY}&client_key=popquiz&limit=12`
       );
