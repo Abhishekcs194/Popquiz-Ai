@@ -84,15 +84,7 @@ export const ChatSheet: React.FC<ChatSheetProps> = ({
   };
 
   return (
-    <>
-      {/* Backdrop - only closes on click, doesn't block game view */}
-      <div 
-        className="fixed inset-0 z-40 bg-black/20 backdrop-blur-sm transition-opacity"
-        onClick={onClose}
-      />
-      
-      {/* Slide-in sheet from right */}
-      <div className="fixed right-0 top-0 bottom-0 z-50 w-full sm:w-96 md:w-[420px] bg-white/10 backdrop-blur-xl border-l border-white/20 shadow-2xl flex flex-col transform transition-transform duration-300 ease-out">
+    <div className="fixed right-0 top-0 bottom-0 z-50 w-full sm:w-96 md:w-[420px] bg-white/10 backdrop-blur-xl border-l border-white/20 shadow-2xl flex flex-col transform transition-transform duration-300 ease-out pointer-events-auto">
         {/* Header */}
         <div className="flex items-center justify-between p-4 border-b border-white/10 bg-black/20">
           <h2 className="text-xl font-black text-white">Chat</h2>
@@ -231,6 +223,5 @@ export const ChatSheet: React.FC<ChatSheetProps> = ({
           </div>
         </form>
       </div>
-    </>
   );
 };

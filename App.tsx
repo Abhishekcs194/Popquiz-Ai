@@ -160,9 +160,10 @@ const App: React.FC = () => {
     const maxAttempts = 20; // 30 seconds max (20 * 1.5s)
 
     // Check if we're a guest (not host) and we're not in the players list yet
+    // Allow joining even when game is in progress (mid-game join)
     const isGuest = !isLocalHost(gameState.players);
     const isInPlayersList = gameState.players.some(p => p.id === localPlayerId);
-    const shouldSendJoinRequest = gameState.status === 'lobby' && isGuest && !isInPlayersList && pendingJoinRef.current;
+    const shouldSendJoinRequest = gameState.status !== 'landing' && isGuest && !isInPlayersList && pendingJoinRef.current;
 
     if (shouldSendJoinRequest) {
       const tryJoin = () => {
@@ -253,7 +254,10 @@ const App: React.FC = () => {
             isHost: false,
             isReady: false,
             hasAnsweredRound: false,
-            isBot: false
+            isBot: false,
+            lastWrongGuess: undefined,
+            answerTime: undefined,
+            finalAnswer: undefined
           };
           
           const playerExists = current.players.some(p => p.id === newPlayer.id);
@@ -307,11 +311,14 @@ const App: React.FC = () => {
       case 'STATE_UPDATE':
         // Accept state updates if:
         // 1. We're not the host, OR
-        // 2. We have no players (initial sync), OR
+        // 2. We have no players (initial sync or joining mid-game), OR
         // 3. We're waiting to join (status is lobby and no players)
+        // 4. We're joining mid-game and the update includes us in the players list
+        const isInPlayersList = msg.payload?.players?.some((p: Player) => p.id === localPlayerId);
         const shouldAcceptUpdate = !isLocalHost(current.players) || 
                                    current.players.length === 0 ||
-                                   (current.status === 'lobby' && current.players.length === 0);
+                                   (current.status === 'lobby' && current.players.length === 0) ||
+                                   (current.players.length === 0 && isInPlayersList); // Joining mid-game
         
         if (shouldAcceptUpdate) {
             // Validate payload structure
