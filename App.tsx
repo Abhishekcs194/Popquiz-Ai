@@ -28,6 +28,18 @@ const App: React.FC = () => {
     return localStorage.getItem('popquiz-player-avatar') || '👤';
   });
   
+  // Chat messages storage (persists across component mounts)
+  interface ChatMessage {
+    id: string;
+    senderId: string;
+    senderName: string;
+    content: string;
+    type: 'text' | 'emoji' | 'gif';
+    timestamp: number;
+  }
+  const chatMessagesRef = useRef<ChatMessage[]>([]);
+  const [chatMessages, setChatMessages] = useState<ChatMessage[]>([]);
+
   // Refs
   const pendingJoinRef = useRef<{name: string, avatar: string} | null>(null);
   const isGeneratingMoreRef = useRef(false); // Flag to prevent concurrent generations
@@ -277,6 +289,17 @@ const App: React.FC = () => {
              };
              
              sendStateUpdate();
+             
+             // Send chat history to newly joined player
+             if (chatMessagesRef.current.length > 0) {
+               setTimeout(() => {
+                 multiplayer.send({
+                   type: 'CHAT_HISTORY_RESPONSE',
+                   payload: { messages: chatMessagesRef.current },
+                   senderId: localPlayerId
+                 });
+               }, 1500);
+             }
           }
         }
         break;
@@ -293,7 +316,20 @@ const App: React.FC = () => {
         if (shouldAcceptUpdate) {
             // Validate payload structure
             if (msg.payload && typeof msg.payload === 'object') {
+                const wasWaitingToJoin = current.players.length === 0;
                 updateState(msg.payload);
+                
+                // If we just successfully joined (were waiting, now have players), request chat history
+                if (wasWaitingToJoin && gameStateRef.current.players.length > 0 && !isLocalHost(gameStateRef.current.players)) {
+                  // Request chat history from host
+                  setTimeout(() => {
+                    multiplayer.send({
+                      type: 'CHAT_HISTORY_REQUEST',
+                      payload: {},
+                      senderId: localPlayerId
+                    });
+                  }, 500);
+                }
             } else {
                 console.warn('[App] Invalid STATE_UPDATE payload');
             }
@@ -312,13 +348,34 @@ const App: React.FC = () => {
         break;
 
       case 'CHAT_MESSAGE':
-        // Chat messages are handled by ChatSheet component
-        // Broadcast to all players (including sender for consistency)
-        if (msg.payload) {
-          // Trigger chat callback if exists
-          if ((window as any).__chatCallback) {
-            (window as any).__chatCallback(msg);
+        // Store chat message globally so all players can see history
+        if (msg.payload && msg.payload.id) {
+          const message: ChatMessage = msg.payload;
+          // Don't add duplicate messages
+          const exists = chatMessagesRef.current.some(m => m.id === message.id);
+          if (!exists) {
+            chatMessagesRef.current = [...chatMessagesRef.current, message];
+            setChatMessages([...chatMessagesRef.current]);
           }
+        }
+        break;
+
+      case 'CHAT_HISTORY_REQUEST':
+        // Host sends chat history to requesting player
+        if (isLocalHost(current.players) && chatMessagesRef.current.length > 0) {
+          multiplayer.send({
+            type: 'CHAT_HISTORY_RESPONSE',
+            payload: { messages: chatMessagesRef.current },
+            senderId: localPlayerId
+          });
+        }
+        break;
+
+      case 'CHAT_HISTORY_RESPONSE':
+        // Receive chat history from host
+        if (msg.payload && msg.payload.messages && Array.isArray(msg.payload.messages)) {
+          chatMessagesRef.current = msg.payload.messages;
+          setChatMessages([...chatMessagesRef.current]);
         }
         break;
 
@@ -331,6 +388,30 @@ const App: React.FC = () => {
             const newPlayers = current.players.map(p =>
               p.id === playerId ? { ...p, name, avatar } : p
             );
+            const newState = updateState({ players: newPlayers });
+            broadcast(newState);
+          }
+        }
+        break;
+
+      case 'KICK_PLAYER':
+        // Handle kick message - if we're the kicked player, disconnect and redirect
+        if (msg.payload && msg.payload.playerId === localPlayerId) {
+          console.log('[App] You have been kicked from the game');
+          multiplayer.disconnect();
+          updateState({ 
+            status: 'landing', 
+            roomId: '', 
+            players: [] 
+          });
+          window.history.pushState({}, '', window.location.origin);
+          // Show a message or notification (optional)
+          alert('You have been kicked from the game by the host.');
+        } else if (isLocalHost(current.players)) {
+          // Host: Remove the kicked player from the list
+          const kickedPlayerId = msg.payload?.playerId;
+          if (kickedPlayerId) {
+            const newPlayers = current.players.filter(p => p.id !== kickedPlayerId);
             const newState = updateState({ players: newPlayers });
             broadcast(newState);
           }
@@ -731,6 +812,52 @@ const App: React.FC = () => {
     });
     broadcast(newState);
   };
+
+  const handleKickPlayer = (playerId: string) => {
+    if (!isLocalHost(gameState.players)) return;
+    
+    // Don't allow kicking yourself
+    if (playerId === localPlayerId) {
+      console.warn('[App] Cannot kick yourself');
+      return;
+    }
+    
+    // Send kick message to the player
+    multiplayer.send({
+      type: 'KICK_PLAYER',
+      payload: { playerId },
+      senderId: localPlayerId
+    });
+    
+    // Remove player from local state immediately
+    const newPlayers = gameState.players.filter(p => p.id !== playerId);
+    const newState = updateState({ players: newPlayers });
+    broadcast(newState);
+  };
+
+  const handleSendChatMessage = (content: string, type: 'text' | 'emoji' | 'gif' = 'text') => {
+    if (!content.trim()) return;
+
+    const message: ChatMessage = {
+      id: `${Date.now()}-${Math.random()}`,
+      senderId: localPlayerId,
+      senderName: localPlayerName,
+      content,
+      type,
+      timestamp: Date.now()
+    };
+
+    // Add to local messages immediately
+    chatMessagesRef.current = [...chatMessagesRef.current, message];
+    setChatMessages([...chatMessagesRef.current]);
+
+    // Broadcast to other players
+    multiplayer.send({
+      type: 'CHAT_MESSAGE',
+      payload: message,
+      senderId: localPlayerId
+    });
+  };
   
   const handleHome = () => {
     window.location.href = window.location.origin;
@@ -772,6 +899,8 @@ const App: React.FC = () => {
           }}
           onUpdatePlayer={handleUpdatePlayer}
           roomId={gameState.roomId || undefined}
+          chatMessages={chatMessages}
+          onSendChatMessage={handleSendChatMessage}
         />
       )}
 
@@ -808,6 +937,7 @@ const App: React.FC = () => {
                     onUpdateSettings={handleUpdateSettings}
                     onReady={handleToggleReady}
                     onStart={handleStartGame}
+                    onKickPlayer={handleKickPlayer}
                 />
              )}
           </div>

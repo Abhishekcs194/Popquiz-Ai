@@ -10,6 +10,7 @@ interface LobbyProps {
   onUpdateSettings: (settings: GameSettings) => void;
   onReady: () => void;
   onStart: () => void;
+  onKickPlayer?: (playerId: string) => void;
 }
 
 export const Lobby: React.FC<LobbyProps> = ({ 
@@ -19,7 +20,8 @@ export const Lobby: React.FC<LobbyProps> = ({
   settings, 
   onUpdateSettings, 
   onReady, 
-  onStart 
+  onStart,
+  onKickPlayer
 }) => {
   const [copied, setCopied] = useState(false);
   const localPlayer = players.find(p => p.id === (window as any).localPlayerId); // Hacky ID check
@@ -174,7 +176,18 @@ export const Lobby: React.FC<LobbyProps> = ({
                                 {p.isReady ? 'Ready' : 'Not Ready'}
                             </div>
                         </div>
-                        {p.isReady && <div className="text-xl">✅</div>}
+                        <div className="flex items-center gap-2">
+                            {p.isReady && <div className="text-xl">✅</div>}
+                            {isHost && !p.isHost && onKickPlayer && (
+                                <button
+                                    onClick={() => onKickPlayer(p.id)}
+                                    className="p-1.5 rounded-lg bg-red-500/20 hover:bg-red-500/40 text-red-400 hover:text-red-300 transition-colors"
+                                    title="Kick player"
+                                >
+                                    🚪
+                                </button>
+                            )}
+                        </div>
                     </div>
                 ))}
             </div>

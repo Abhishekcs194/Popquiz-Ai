@@ -7,7 +7,10 @@ export type MessageType =
   | 'PLAYER_ACTION' 
   | 'HOST_ACTION'
   | 'CHAT_MESSAGE'
+  | 'CHAT_HISTORY_REQUEST'
+  | 'CHAT_HISTORY_RESPONSE'
   | 'PLAYER_UPDATE'
+  | 'KICK_PLAYER'
   | 'PING'
   | 'PONG';
 

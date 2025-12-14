@@ -1,5 +1,4 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { multiplayer, NetworkMessage } from '../services/multiplayer';
 
 interface ChatMessage {
   id: string;
@@ -14,12 +13,19 @@ interface ChatSheetProps {
   onClose: () => void;
   localPlayerId: string;
   localPlayerName: string;
+  messages: ChatMessage[];
+  onSendMessage?: (content: string, type?: 'text' | 'emoji' | 'gif') => void;
 }
 
 const EMOJIS = ['😀', '😂', '😍', '🥳', '😎', '🤔', '😮', '👍', '👎', '❤️', '🔥', '💯', '🎉', '🎮', '🏆', '👏', '🙌', '🤝', '💪', '🎯'];
 
-export const ChatSheet: React.FC<ChatSheetProps> = ({ onClose, localPlayerId, localPlayerName }) => {
-  const [messages, setMessages] = useState<ChatMessage[]>([]);
+export const ChatSheet: React.FC<ChatSheetProps> = ({ 
+  onClose, 
+  localPlayerId, 
+  localPlayerName, 
+  messages,
+  onSendMessage 
+}) => {
   const [input, setInput] = useState('');
   const [showEmojiPicker, setShowEmojiPicker] = useState(false);
   const [showGifPicker, setShowGifPicker] = useState(false);
@@ -32,27 +38,6 @@ export const ChatSheet: React.FC<ChatSheetProps> = ({ onClose, localPlayerId, lo
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages]);
-
-  // Listen for chat messages via App's message handler
-  useEffect(() => {
-    const handleChatMessage = (msg: NetworkMessage) => {
-      if (msg.type === 'CHAT_MESSAGE' && msg.payload) {
-        // Don't add duplicate messages (check by id)
-        setMessages((prev) => {
-          const exists = prev.some(m => m.id === msg.payload.id);
-          if (exists) return prev;
-          return [...prev, msg.payload];
-        });
-      }
-    };
-
-    // Store callback for App.tsx to call
-    (window as any).__chatCallback = handleChatMessage;
-
-    return () => {
-      delete (window as any).__chatCallback;
-    };
-  }, []);
 
   // Search GIFs from Tenor
   const searchGifs = async (query: string) => {
@@ -75,27 +60,8 @@ export const ChatSheet: React.FC<ChatSheetProps> = ({ onClose, localPlayerId, lo
   };
 
   const sendMessage = (content: string, type: 'text' | 'emoji' | 'gif' = 'text') => {
-    if (!content.trim()) return;
-
-    const message: ChatMessage = {
-      id: `${Date.now()}-${Math.random()}`,
-      senderId: localPlayerId,
-      senderName: localPlayerName,
-      content,
-      type,
-      timestamp: Date.now()
-    };
-
-    // Add to local messages immediately
-    setMessages((prev) => [...prev, message]);
-
-    // Broadcast to other players
-    multiplayer.send({
-      type: 'CHAT_MESSAGE',
-      payload: message,
-      senderId: localPlayerId
-    });
-
+    if (!content.trim() || !onSendMessage) return;
+    onSendMessage(content.trim(), type);
     setInput('');
     setShowEmojiPicker(false);
     setShowGifPicker(false);
@@ -118,22 +84,28 @@ export const ChatSheet: React.FC<ChatSheetProps> = ({ onClose, localPlayerId, lo
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-end md:items-center justify-center">
-      <div className="fixed inset-0 bg-black/60 backdrop-blur-sm" onClick={onClose} />
-      <div className="relative bg-white/10 backdrop-blur-xl rounded-t-3xl md:rounded-3xl border-t md:border border-white/20 w-full md:max-w-2xl h-[80vh] md:h-[600px] flex flex-col shadow-2xl">
+    <>
+      {/* Backdrop - only closes on click, doesn't block game view */}
+      <div 
+        className="fixed inset-0 z-40 bg-black/20 backdrop-blur-sm transition-opacity"
+        onClick={onClose}
+      />
+      
+      {/* Slide-in sheet from right */}
+      <div className="fixed right-0 top-0 bottom-0 z-50 w-full sm:w-96 md:w-[420px] bg-white/10 backdrop-blur-xl border-l border-white/20 shadow-2xl flex flex-col transform transition-transform duration-300 ease-out">
         {/* Header */}
-        <div className="flex items-center justify-between p-4 border-b border-white/10">
+        <div className="flex items-center justify-between p-4 border-b border-white/10 bg-black/20">
           <h2 className="text-xl font-black text-white">Chat</h2>
           <button
             onClick={onClose}
-            className="p-2 rounded-lg hover:bg-white/10 text-white text-xl"
+            className="p-2 rounded-lg hover:bg-white/10 text-white text-xl transition-colors"
           >
             ✕
           </button>
         </div>
 
         {/* Messages */}
-        <div className="flex-1 overflow-y-auto p-4 space-y-3">
+        <div className="flex-1 overflow-y-auto p-4 space-y-3 custom-scrollbar">
           {messages.length === 0 ? (
             <div className="text-center text-white/40 mt-8">
               No messages yet. Start the conversation!
@@ -145,7 +117,7 @@ export const ChatSheet: React.FC<ChatSheetProps> = ({ onClose, localPlayerId, lo
                 className={`flex ${msg.senderId === localPlayerId ? 'justify-end' : 'justify-start'}`}
               >
                 <div
-                  className={`max-w-[70%] rounded-2xl p-3 ${
+                  className={`max-w-[75%] rounded-2xl p-3 ${
                     msg.senderId === localPlayerId
                       ? 'bg-gradient-to-r from-yellow-400 to-pink-500 text-white'
                       : 'bg-white/10 text-white'
@@ -157,7 +129,7 @@ export const ChatSheet: React.FC<ChatSheetProps> = ({ onClose, localPlayerId, lo
                   {msg.type === 'gif' ? (
                     <img src={msg.content} alt="GIF" className="max-w-full rounded-lg" />
                   ) : (
-                    <div className="text-sm md:text-base">{msg.content}</div>
+                    <div className="text-sm md:text-base break-words">{msg.content}</div>
                   )}
                 </div>
               </div>
@@ -219,7 +191,7 @@ export const ChatSheet: React.FC<ChatSheetProps> = ({ onClose, localPlayerId, lo
         )}
 
         {/* Input */}
-        <form onSubmit={handleSubmit} className="border-t border-white/10 p-4">
+        <form onSubmit={handleSubmit} className="border-t border-white/10 p-4 bg-black/20">
           <div className="flex gap-2">
             <button
               type="button"
@@ -227,7 +199,7 @@ export const ChatSheet: React.FC<ChatSheetProps> = ({ onClose, localPlayerId, lo
                 setShowEmojiPicker(!showEmojiPicker);
                 setShowGifPicker(false);
               }}
-              className="p-2 rounded-lg bg-white/10 hover:bg-white/20 text-xl"
+              className="p-2 rounded-lg bg-white/10 hover:bg-white/20 text-xl transition-colors"
             >
               😀
             </button>
@@ -237,7 +209,7 @@ export const ChatSheet: React.FC<ChatSheetProps> = ({ onClose, localPlayerId, lo
                 setShowGifPicker(!showGifPicker);
                 setShowEmojiPicker(false);
               }}
-              className="p-2 rounded-lg bg-white/10 hover:bg-white/20 text-xl"
+              className="p-2 rounded-lg bg-white/10 hover:bg-white/20 text-xl transition-colors"
             >
               🎬
             </button>
@@ -252,14 +224,13 @@ export const ChatSheet: React.FC<ChatSheetProps> = ({ onClose, localPlayerId, lo
             <button
               type="submit"
               disabled={!input.trim()}
-              className="px-4 py-2 rounded-lg bg-gradient-to-r from-yellow-400 to-pink-500 hover:from-yellow-500 hover:to-pink-600 text-white font-bold disabled:opacity-50 disabled:cursor-not-allowed"
+              className="px-4 py-2 rounded-lg bg-gradient-to-r from-yellow-400 to-pink-500 hover:from-yellow-500 hover:to-pink-600 text-white font-bold disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
             >
               Send
             </button>
           </div>
         </form>
       </div>
-    </div>
+    </>
   );
 };
-

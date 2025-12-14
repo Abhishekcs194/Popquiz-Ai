@@ -4,14 +4,25 @@ import { ProfileModal } from './ProfileModal';
 import { ChatSheet } from './ChatSheet';
 import { Player } from '../types';
 
+interface ChatMessage {
+  id: string;
+  senderId: string;
+  senderName: string;
+  content: string;
+  type: 'text' | 'emoji' | 'gif';
+  timestamp: number;
+}
+
 interface NavbarProps {
   onHome: () => void;
   localPlayer: Player | null;
   onUpdatePlayer: (name: string, avatar: string) => void;
   roomId?: string;
+  chatMessages?: ChatMessage[];
+  onSendChatMessage?: (content: string, type?: 'text' | 'emoji' | 'gif') => void;
 }
 
-export const Navbar: React.FC<NavbarProps> = ({ onHome, localPlayer, onUpdatePlayer, roomId }) => {
+export const Navbar: React.FC<NavbarProps> = ({ onHome, localPlayer, onUpdatePlayer, roomId, chatMessages = [], onSendChatMessage }) => {
   const { theme, setTheme } = useTheme();
   const [showProfile, setShowProfile] = useState(false);
   const [showChat, setShowChat] = useState(false);
@@ -126,6 +137,8 @@ export const Navbar: React.FC<NavbarProps> = ({ onHome, localPlayer, onUpdatePla
           onClose={() => setShowChat(false)}
           localPlayerId={localPlayer?.id || ''}
           localPlayerName={localPlayer?.name || 'Player'}
+          messages={chatMessages}
+          onSendMessage={onSendChatMessage}
         />
       )}
     </>
